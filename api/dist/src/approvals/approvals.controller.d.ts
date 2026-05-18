@@ -25,9 +25,9 @@ export declare class ApprovalsController {
             id: string;
             createdAt: Date;
             note: string | null;
+            approved: boolean;
             invoiceId: string;
             approverId: string;
-            approved: boolean;
         })[];
         vendor: {
             id: string;

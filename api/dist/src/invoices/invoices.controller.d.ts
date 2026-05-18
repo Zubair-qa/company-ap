@@ -19,9 +19,9 @@ export declare class InvoicesController {
             id: string;
             createdAt: Date;
             note: string | null;
+            approved: boolean;
             invoiceId: string;
             approverId: string;
-            approved: boolean;
         }[];
         vendor: {
             id: string;
@@ -78,9 +78,9 @@ export declare class InvoicesController {
             id: string;
             createdAt: Date;
             note: string | null;
+            approved: boolean;
             invoiceId: string;
             approverId: string;
-            approved: boolean;
         })[];
         vendor: {
             id: string;
@@ -130,9 +130,9 @@ export declare class InvoicesController {
             id: string;
             createdAt: Date;
             note: string | null;
+            approved: boolean;
             invoiceId: string;
             approverId: string;
-            approved: boolean;
         }[];
         vendor: {
             id: string;
@@ -181,9 +181,9 @@ export declare class InvoicesController {
             id: string;
             createdAt: Date;
             note: string | null;
+            approved: boolean;
             invoiceId: string;
             approverId: string;
-            approved: boolean;
         }[];
         vendor: {
             id: string;
@@ -232,9 +232,9 @@ export declare class InvoicesController {
             id: string;
             createdAt: Date;
             note: string | null;
+            approved: boolean;
             invoiceId: string;
             approverId: string;
-            approved: boolean;
         }[];
         vendor: {
             id: string;

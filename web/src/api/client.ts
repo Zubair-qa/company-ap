@@ -25,10 +25,32 @@ export type User = {
   departmentId: string | null;
 };
 
-export async function login(email: string, password: string) {
+export type Department = {
+  id: string;
+  name: string;
+};
+
+export type RegisterPayload = {
+  name: string;
+  email: string;
+  password: string;
+  departmentId: string;
+  role: string;
+};
+
+export async function login(email: string, password: string, departmentId: string) {
   const { data } = await api.post<{ accessToken: string; user: User }>(
     '/api/auth/login',
-    { email, password },
+    { email, password, departmentId },
+  );
+  localStorage.setItem('ap_token', data.accessToken);
+  return data.user;
+}
+
+export async function register(payload: RegisterPayload) {
+  const { data } = await api.post<{ accessToken: string; user: User }>(
+    '/api/auth/register',
+    payload,
   );
   localStorage.setItem('ap_token', data.accessToken);
   return data.user;

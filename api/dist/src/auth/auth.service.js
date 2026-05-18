@@ -63,6 +63,33 @@ let AuthService = class AuthService {
         const ok = await bcrypt.compare(dto.password, user.passwordHash);
         if (!ok)
             throw new common_1.UnauthorizedException('Invalid credentials');
+        if (user.departmentId !== dto.departmentId) {
+            throw new common_1.UnauthorizedException('Invalid department for this user');
+        }
+        return this.issueSession(user);
+    }
+    async register(dto) {
+        const department = await this.prisma.department.findUnique({
+            where: { id: dto.departmentId },
+        });
+        if (!department)
+            throw new common_1.BadRequestException('Invalid department');
+        const email = dto.email.toLowerCase();
+        const existing = await this.prisma.user.findUnique({ where: { email } });
+        if (existing)
+            throw new common_1.ConflictException('Email is already registered');
+        const user = await this.prisma.user.create({
+            data: {
+                email,
+                name: dto.name.trim(),
+                passwordHash: await bcrypt.hash(dto.password, 10),
+                role: dto.role,
+                departmentId: dto.departmentId,
+            },
+        });
+        return this.issueSession(user);
+    }
+    async issueSession(user) {
         const payload = { sub: user.id, email: user.email };
         return {
             accessToken: await this.jwt.signAsync(payload),

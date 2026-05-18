@@ -13,6 +13,7 @@ exports.DepartmentsController = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const roles_guard_1 = require("../auth/roles.guard");
+const public_decorator_1 = require("../common/public.decorator");
 let DepartmentsController = class DepartmentsController {
     prisma;
     constructor(prisma) {
@@ -24,6 +25,7 @@ let DepartmentsController = class DepartmentsController {
 };
 exports.DepartmentsController = DepartmentsController;
 __decorate([
+    (0, public_decorator_1.Public)(),
     (0, common_1.Get)(),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),

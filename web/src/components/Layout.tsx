@@ -1,4 +1,4 @@
-import { Link, Outlet } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 
 export function Layout() {
@@ -10,7 +10,8 @@ export function Layout() {
         <h1>Accounts payable</h1>
         {user ? (
           <nav>
-            <Link to="/">Invoices</Link>
+            <NavLink to="/">Dashboard</NavLink>
+            <NavLink to="/invoices">Invoices</NavLink>
             <span className="muted" style={{ color: '#94a3b8' }}>
               {user.name} · {user.role.replaceAll('_', ' ')}
             </span>

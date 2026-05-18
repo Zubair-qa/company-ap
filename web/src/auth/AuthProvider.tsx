@@ -6,13 +6,20 @@ import {
   useMemo,
   useState,
 } from 'react';
-import type { User } from '../api/client';
-import { api, getToken, login as apiLogin, logout as apiLogout } from '../api/client';
+import type { RegisterPayload, User } from '../api/client';
+import {
+  api,
+  getToken,
+  login as apiLogin,
+  logout as apiLogout,
+  register as apiRegister,
+} from '../api/client';
 
 type AuthState = {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, departmentId: string) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
 };
 
@@ -29,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     api
-      .get<User>('/api/me')
+      .get<User>('/api/auth/me')
       .then((r) => setUser(r.data))
       .catch(() => {
         apiLogout();
@@ -38,8 +45,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const u = await apiLogin(email, password);
+  const login = useCallback(async (email: string, password: string, departmentId: string) => {
+    const u = await apiLogin(email, password, departmentId);
+    setUser(u);
+  }, []);
+
+  const register = useCallback(async (payload: RegisterPayload) => {
+    const u = await apiRegister(payload);
     setUser(u);
   }, []);
 
@@ -49,8 +61,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, logout }),
-    [user, loading, login, logout],
+    () => ({ user, loading, login, register, logout }),
+    [user, loading, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

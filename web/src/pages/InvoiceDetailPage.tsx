@@ -127,7 +127,7 @@ export function InvoiceDetailPage() {
   return (
     <div>
       <p>
-        <Link to="/">← Back</Link>
+        <Link to="/invoices">← Back</Link>
       </p>
       <h2 style={{ marginTop: 0 }}>Invoice</h2>
       <div className="card">

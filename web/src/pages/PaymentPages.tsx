@@ -11,6 +11,7 @@ type PaymentInvoice = {
   id: string;
   reference: string | null;
   amountPkr: string;
+  totalAmountPkr: string;
   status: string;
   vendor: { displayName: string } | null;
 };
@@ -109,7 +110,7 @@ export function PaymentSandboxPage() {
         <strong>Vendor:</strong> {invoice.data.vendor?.displayName ?? 'Not linked'}
       </p>
       <p>
-        <strong>Amount:</strong> {pkr.format(Number(invoice.data.amountPkr))}
+        <strong>Total amount:</strong> {pkr.format(Number(invoice.data.totalAmountPkr))}
       </p>
       <p className="muted">
         Test card <code>{TEST_CARD_NUMBER}</code>, any future expiry, any CVC.

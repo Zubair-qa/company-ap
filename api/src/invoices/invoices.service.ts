@@ -23,6 +23,21 @@ function uploadRoot() {
   return process.env.UPLOAD_DIR || './uploads';
 }
 
+function decimal(value: Prisma.Decimal.Value) {
+  return new Prisma.Decimal(value);
+}
+
+function calculateTotalAmountPkr(
+  amountPkr: Prisma.Decimal.Value,
+  whtTax: Prisma.Decimal.Value,
+  salesTax: Prisma.Decimal.Value,
+  incomeTax: Prisma.Decimal.Value,
+) {
+  const amount = decimal(amountPkr);
+  const taxPercent = decimal(whtTax).plus(salesTax).plus(incomeTax);
+  return amount.plus(amount.mul(taxPercent).div(100)).toDecimalPlaces(2);
+}
+
 const invoiceInclude = Prisma.validator<Prisma.InvoiceInclude>()({
   vendor: true,
   department: true,
@@ -85,6 +100,7 @@ export class InvoicesService {
         mimeType: file.mimetype,
         extracted: extracted as Prisma.InputJsonValue,
         amountPkr,
+        totalAmountPkr: calculateTotalAmountPkr(amountPkr, 0, 0, 0),
         reference,
         description,
         status,
@@ -172,6 +188,23 @@ export class InvoicesService {
 
     const data: Prisma.InvoiceUpdateInput = {};
     if (dto.amountPkr != null) data.amountPkr = new Prisma.Decimal(dto.amountPkr);
+    if (dto.taxFilerStatus != null) data.taxFilerStatus = dto.taxFilerStatus;
+    if (dto.whtTax != null) data.whtTax = new Prisma.Decimal(dto.whtTax);
+    if (dto.salesTax != null) data.salesTax = new Prisma.Decimal(dto.salesTax);
+    if (dto.incomeTax != null) data.incomeTax = new Prisma.Decimal(dto.incomeTax);
+    if (
+      dto.amountPkr != null ||
+      dto.whtTax != null ||
+      dto.salesTax != null ||
+      dto.incomeTax != null
+    ) {
+      data.totalAmountPkr = calculateTotalAmountPkr(
+        dto.amountPkr ?? inv.amountPkr,
+        dto.whtTax ?? inv.whtTax,
+        dto.salesTax ?? inv.salesTax,
+        dto.incomeTax ?? inv.incomeTax,
+      );
+    }
     if (dto.reference !== undefined) data.reference = dto.reference;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.departmentId) {
@@ -296,6 +329,7 @@ export class InvoicesService {
         submittedById,
         extracted: extracted as Prisma.InputJsonValue,
         amountPkr: new Prisma.Decimal(extracted.amountPkr ?? 0),
+        totalAmountPkr: calculateTotalAmountPkr(extracted.amountPkr ?? 0, 0, 0, 0),
         reference: extracted.reference ?? null,
         description:
           extracted.description ?? 'Imported from published spreadsheet (CSV) URL',

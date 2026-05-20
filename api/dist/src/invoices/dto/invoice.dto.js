@@ -48,6 +48,10 @@ class PatchInvoiceDto {
     reference;
     description;
     amountPkr;
+    taxFilerStatus;
+    whtTax;
+    salesTax;
+    incomeTax;
     departmentId;
     vendorId;
     dueDate;
@@ -70,6 +74,35 @@ __decorate([
     (0, class_validator_1.Min)(0.01),
     __metadata("design:type", Number)
 ], PatchInvoiceDto.prototype, "amountPkr", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsEnum)(client_1.TaxFilerStatus),
+    __metadata("design:type", String)
+], PatchInvoiceDto.prototype, "taxFilerStatus", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(100),
+    __metadata("design:type", Number)
+], PatchInvoiceDto.prototype, "whtTax", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(100),
+    __metadata("design:type", Number)
+], PatchInvoiceDto.prototype, "salesTax", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Type)(() => Number),
+    (0, class_validator_1.IsNumber)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(100),
+    __metadata("design:type", Number)
+], PatchInvoiceDto.prototype, "incomeTax", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),

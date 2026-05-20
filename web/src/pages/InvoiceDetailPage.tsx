@@ -12,6 +12,11 @@ type InvoiceDetail = {
   id: string;
   reference: string | null;
   amountPkr: string;
+  taxFilerStatus: 'FILER' | 'NON_FILER';
+  whtTax: string;
+  salesTax: string;
+  incomeTax: string;
+  totalAmountPkr: string;
   status: string;
   description: string | null;
   departmentId: string;
@@ -25,6 +30,38 @@ const pkr = new Intl.NumberFormat('en-PK', {
   currency: 'PKR',
   maximumFractionDigits: 0,
 });
+
+function numberValue(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function calculateTaxAmount(amountPkr: unknown, rate: unknown) {
+  return (numberValue(amountPkr) * numberValue(rate)) / 100;
+}
+
+function calculateTotalAmount(
+  amountPkr: unknown,
+  whtTax: unknown,
+  salesTax: unknown,
+  incomeTax: unknown,
+) {
+  return (
+    numberValue(amountPkr) +
+    calculateTaxAmount(amountPkr, whtTax) +
+    calculateTaxAmount(amountPkr, salesTax) +
+    calculateTaxAmount(amountPkr, incomeTax)
+  );
+}
+
+function invoiceTotalAmount(invoice: InvoiceDetail) {
+  return calculateTotalAmount(
+    invoice.amountPkr,
+    invoice.whtTax,
+    invoice.salesTax,
+    invoice.incomeTax,
+  );
+}
 
 export function InvoiceDetailPage() {
   const { id } = useParams();
@@ -131,8 +168,23 @@ export function InvoiceDetailPage() {
       <h2 style={{ marginTop: 0 }}>Invoice</h2>
       <div className="card">
         <p>
-          <strong>Amount:</strong> {pkr.format(Number(inv.amountPkr))}{' '}
+          <strong>Amount:</strong> {pkr.format(numberValue(inv.amountPkr))}{' '}
           <span className="badge">{inv.status.replaceAll('_', ' ')}</span>
+        </p>
+        <p>
+          <strong>Filer status:</strong> {formatFilerStatus(inv.taxFilerStatus)}
+        </p>
+        <p>
+          <strong>WHT tax:</strong> {formatTaxCalculation(inv.amountPkr, inv.whtTax)}
+        </p>
+        <p>
+          <strong>Sales tax:</strong> {formatTaxCalculation(inv.amountPkr, inv.salesTax)}
+        </p>
+        <p>
+          <strong>Income tax:</strong> {formatTaxCalculation(inv.amountPkr, inv.incomeTax)}
+        </p>
+        <p>
+          <strong>Total amount:</strong> {pkr.format(invoiceTotalAmount(inv))}
         </p>
         <p>
           <strong>Department:</strong> {inv.department.name}
@@ -244,15 +296,24 @@ function EditInvoiceForm({
   onSave: (body: Record<string, unknown>) => void;
 }) {
   const [amountPkr, setAmount] = useState(invoice.amountPkr);
+  const [taxFilerStatus, setTaxFilerStatus] = useState(invoice.taxFilerStatus ?? 'FILER');
+  const [whtTax, setWhtTax] = useState(String(invoice.whtTax ?? 0));
+  const [salesTax, setSalesTax] = useState(String(invoice.salesTax ?? 0));
+  const [incomeTax, setIncomeTax] = useState(String(invoice.incomeTax ?? 0));
   const [reference, setRef] = useState(invoice.reference ?? '');
   const [description, setDesc] = useState(invoice.description ?? '');
   const [departmentId, setDept] = useState(invoice.departmentId);
   const [vendorId, setVendor] = useState(invoice.vendorId ?? '');
+  const calculatedTotal = calculateTotalAmount(amountPkr, whtTax, salesTax, incomeTax);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     onSave({
       amountPkr: Number(amountPkr),
+      taxFilerStatus,
+      whtTax: Number(whtTax),
+      salesTax: Number(salesTax),
+      incomeTax: Number(incomeTax),
       reference: reference || undefined,
       description: description || undefined,
       departmentId,
@@ -275,6 +336,75 @@ function EditInvoiceForm({
             required
           />
         </div>
+        <fieldset className="tax-fieldset">
+          <legend>Tax details</legend>
+          <div className="tax-grid">
+            <div className="field">
+              <label htmlFor="tax-filer-status">Filer status</label>
+              <select
+                id="tax-filer-status"
+                value={taxFilerStatus}
+                onChange={(e) => setTaxFilerStatus(e.target.value as 'FILER' | 'NON_FILER')}
+                required
+              >
+                <option value="FILER">Filer</option>
+                <option value="NON_FILER">Non filer</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="wht-tax">WHT tax (%)</label>
+              <input
+                id="wht-tax"
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                value={whtTax}
+                onChange={(e) => setWhtTax(e.target.value)}
+                required
+              />
+              <small className="field-hint">{pkr.format(calculateTaxAmount(amountPkr, whtTax))}</small>
+            </div>
+            <div className="field">
+              <label htmlFor="sales-tax">Sales tax (%)</label>
+              <input
+                id="sales-tax"
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                value={salesTax}
+                onChange={(e) => setSalesTax(e.target.value)}
+                required
+              />
+              <small className="field-hint">{pkr.format(calculateTaxAmount(amountPkr, salesTax))}</small>
+            </div>
+            <div className="field">
+              <label htmlFor="income-tax">Income tax (%)</label>
+              <input
+                id="income-tax"
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                value={incomeTax}
+                onChange={(e) => setIncomeTax(e.target.value)}
+                required
+              />
+              <small className="field-hint">{pkr.format(calculateTaxAmount(amountPkr, incomeTax))}</small>
+            </div>
+            <div className="field">
+              <label htmlFor="total-amount">Total amount (PKR)</label>
+              <input
+                id="total-amount"
+                type="number"
+                step={1}
+                value={Math.round(calculatedTotal)}
+                readOnly
+              />
+            </div>
+          </div>
+        </fieldset>
         <div className="field">
           <label>Reference</label>
           <input value={reference} onChange={(e) => setRef(e.target.value)} />
@@ -310,4 +440,18 @@ function EditInvoiceForm({
       </form>
     </div>
   );
+}
+
+function formatFilerStatus(status: 'FILER' | 'NON_FILER') {
+  return status === 'NON_FILER' ? 'Non filer' : 'Filer';
+}
+
+function formatPercent(value: unknown) {
+  return `${numberValue(value).toLocaleString('en-PK', {
+    maximumFractionDigits: 2,
+  })}%`;
+}
+
+function formatTaxCalculation(amountPkr: unknown, rate: unknown) {
+  return `${formatPercent(rate)} (${pkr.format(calculateTaxAmount(amountPkr, rate))})`;
 }

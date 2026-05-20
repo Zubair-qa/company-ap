@@ -16,42 +16,45 @@ export declare class PaymentsController {
         expiry?: string;
         cvc?: string;
     }): Promise<{
-        vendor: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            displayName: string;
-            legalName: string | null;
-            taxNumber: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
-            active: boolean;
-        } | null;
         department: {
             id: string;
             name: string;
         };
+        approvals: {
+            id: string;
+            createdAt: Date;
+            note: string | null;
+            approved: boolean;
+            invoiceId: string;
+            approverId: string;
+        }[];
+        vendor: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            taxNumber: string | null;
+            displayName: string;
+            legalName: string | null;
+            kind: import(".prisma/client").$Enums.VendorKind;
+            active: boolean;
+        } | null;
         submittedBy: {
             id: string;
             name: string;
             email: string;
         };
-        approvals: {
-            id: string;
-            createdAt: Date;
-            invoiceId: string;
-            approverId: string;
-            approved: boolean;
-            note: string | null;
-        }[];
     } & {
         id: string;
+        departmentId: string;
+        createdAt: Date;
+        updatedAt: Date;
         reference: string | null;
         amountPkr: import("@prisma/client/runtime/library").Decimal;
+        taxFilerStatus: import(".prisma/client").$Enums.TaxFilerStatus;
         whtTax: import("@prisma/client/runtime/library").Decimal;
         salesTax: import("@prisma/client/runtime/library").Decimal;
         incomeTax: import("@prisma/client/runtime/library").Decimal;
         totalAmountPkr: import("@prisma/client/runtime/library").Decimal;
-        taxFilerStatus: import(".prisma/client").$Enums.TaxFilerStatus;
         dueDate: Date | null;
         description: string | null;
         status: import(".prisma/client").$Enums.InvoiceStatus;
@@ -60,11 +63,8 @@ export declare class PaymentsController {
         mimeType: string | null;
         extracted: import("@prisma/client/runtime/library").JsonValue | null;
         vendorId: string | null;
-        departmentId: string;
         submittedById: string;
         stripeCheckoutSessionId: string | null;
         stripePaymentIntentId: string | null;
-        createdAt: Date;
-        updatedAt: Date;
     }>;
 }

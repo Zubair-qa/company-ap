@@ -46,6 +46,11 @@ export declare class ApprovalsService {
         updatedAt: Date;
         reference: string | null;
         amountPkr: import("@prisma/client/runtime/library").Decimal;
+        taxFilerStatus: import(".prisma/client").$Enums.TaxFilerStatus;
+        whtTax: import("@prisma/client/runtime/library").Decimal;
+        salesTax: import("@prisma/client/runtime/library").Decimal;
+        incomeTax: import("@prisma/client/runtime/library").Decimal;
+        totalAmountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
         status: import(".prisma/client").$Enums.InvoiceStatus;

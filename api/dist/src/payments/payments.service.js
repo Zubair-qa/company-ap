@@ -48,7 +48,7 @@ let PaymentsService = class PaymentsService {
             }
             throw new common_1.BadRequestException('Stripe is not configured. Set STRIPE_SECRET_KEY in api/.env or enable STRIPE_SANDBOX_MODE=true');
         }
-        const rupees = Number(inv.amountPkr);
+        const rupees = Number(inv.totalAmountPkr);
         if (!Number.isFinite(rupees) || rupees <= 0) {
             throw new common_1.BadRequestException('Invalid invoice amount');
         }

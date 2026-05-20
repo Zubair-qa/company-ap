@@ -139,6 +139,37 @@ button {
   background: #fff;
 }
 
+.tax-fieldset {
+  margin: 0 0 0.85rem;
+  padding: 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.tax-fieldset legend {
+  padding: 0 0.35rem;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.tax-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.tax-grid .field {
+  margin-bottom: 0;
+}
+
+.field-hint {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -604,7 +635,8 @@ th {
 
   .metric-grid,
   .dashboard-grid,
-  .dashboard-grid-secondary {
+  .dashboard-grid-secondary,
+  .tax-grid {
     grid-template-columns: 1fr;
   }
 }

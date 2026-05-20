@@ -7,6 +7,7 @@ type InvoiceRow = {
   id: string;
   reference: string | null;
   amountPkr: string;
+  totalAmountPkr: string;
   status: string;
   department: { name: string };
   vendor: { displayName: string } | null;
@@ -50,6 +51,7 @@ export function InvoicesPage() {
               <th>Department</th>
               <th>Vendor</th>
               <th>Amount</th>
+              <th>Total amount</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -61,6 +63,7 @@ export function InvoicesPage() {
                 <td>{inv.department.name}</td>
                 <td>{inv.vendor?.displayName ?? '—'}</td>
                 <td>{pkr.format(Number(inv.amountPkr))}</td>
+                <td>{pkr.format(Number(inv.totalAmountPkr))}</td>
                 <td>
                   <span className="badge">{inv.status.replaceAll('_', ' ')}</span>
                 </td>

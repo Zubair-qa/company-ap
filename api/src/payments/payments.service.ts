@@ -52,7 +52,7 @@ export class PaymentsService {
       );
     }
 
-    const rupees = Number(inv.amountPkr);
+    const rupees = Number(inv.totalAmountPkr);
     if (!Number.isFinite(rupees) || rupees <= 0) {
       throw new BadRequestException('Invalid invoice amount');
     }

@@ -4,6 +4,10 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 
+process.env.JWT_SECRET ||= 'test-secret';
+process.env.DATABASE_URL ||=
+  'postgresql://ap:ap@localhost:5432/company_ap?schema=public';
+
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -13,14 +17,15 @@ describe('AppController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api');
     await app.init();
   });
 
-  it('/ (GET)', () => {
+  it('/api/health (GET)', () => {
     return request(app.getHttpServer())
-      .get('/')
+      .get('/api/health')
       .expect(200)
-      .expect('Hello World!');
+      .expect({ ok: true, service: 'company-ap-api' });
   });
 
   afterEach(async () => {

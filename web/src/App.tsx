@@ -5,12 +5,11 @@ import { DashboardPage } from './pages/DashboardPage';
 import { InvoiceDetailPage } from './pages/InvoiceDetailPage';
 import { InvoicesPage } from './pages/InvoicesPage';
 import { LoginPage } from './pages/LoginPage';
-import {
-  PaymentCancelPage,
-  PaymentSandboxPage,
-  PaymentSuccessPage,
-} from './pages/PaymentPages';
+import { OperationsPage } from './pages/OperationsPage';
+import { PaymentCancelPage, PaymentSuccessPage } from './pages/PaymentPages';
 import { RegisterPage } from './pages/RegisterPage';
+import { TicketDetailPage } from './pages/TicketDetailPage';
+import { TicketsBoardPage } from './pages/TicketsBoardPage';
 import { UploadPage } from './pages/UploadPage';
 
 export default function App() {
@@ -22,11 +21,13 @@ export default function App() {
       <Route path="/payments/cancel" element={<PaymentCancelPage />} />
       <Route element={<RequireAuth />}>
         <Route element={<Layout />}>
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/" element={<TicketsBoardPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/operations" element={<OperationsPage />} />
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route path="/invoices" element={<InvoicesPage />} />
           <Route path="/upload" element={<UploadPage />} />
           <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-          <Route path="/payments/sandbox" element={<PaymentSandboxPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -10,6 +10,8 @@ import { InvoicesModule } from './invoices/invoices.module';
 import { ApprovalsModule } from './approvals/approvals.module';
 import { PaymentsModule } from './payments/payments.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { TicketsModule } from './tickets/tickets.module';
+import { FullScopeModule } from './full-scope/full-scope.module';
 
 @Module({
   imports: [
@@ -19,8 +21,10 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
     DepartmentsModule,
     VendorsModule,
     InvoicesModule,
+    TicketsModule,
     ApprovalsModule,
     PaymentsModule,
+    FullScopeModule,
   ],
   controllers: [AppController],
   providers: [

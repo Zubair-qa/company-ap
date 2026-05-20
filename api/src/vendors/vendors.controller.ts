@@ -11,7 +11,7 @@ export class VendorsController {
   constructor(private prisma: PrismaService) {}
 
   @Get()
-  @Roles(Role.COMPANY_ADMIN, Role.AP_CLERK, Role.DEPT_ADMIN)
+  @Roles(Role.COMPANY_ADMIN, Role.AP_CLERK, Role.DEPT_USER, Role.DEPT_ADMIN)
   list() {
     return this.prisma.vendor.findMany({
       where: { active: true },

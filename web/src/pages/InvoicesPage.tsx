@@ -7,7 +7,6 @@ type InvoiceRow = {
   id: string;
   reference: string | null;
   amountPkr: string;
-  totalAmountPkr: string;
   status: string;
   department: { name: string };
   vendor: { displayName: string } | null;
@@ -35,9 +34,9 @@ export function InvoicesPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ marginTop: 0 }}>Invoices</h2>
-        {(user.role === 'AP_CLERK' || user.role === 'COMPANY_ADMIN') && (
+        {(user.role === 'DEPT_USER' || user.role === 'COMPANY_ADMIN') && (
           <Link to="/upload" className="btn btn-primary" style={{ textDecoration: 'none' }}>
-            Upload invoice
+            Create invoice
           </Link>
         )}
       </div>
@@ -51,7 +50,6 @@ export function InvoicesPage() {
               <th>Department</th>
               <th>Vendor</th>
               <th>Amount</th>
-              <th>Total amount</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -63,7 +61,6 @@ export function InvoicesPage() {
                 <td>{inv.department.name}</td>
                 <td>{inv.vendor?.displayName ?? '—'}</td>
                 <td>{pkr.format(Number(inv.amountPkr))}</td>
-                <td>{pkr.format(Number(inv.totalAmountPkr))}</td>
                 <td>
                   <span className="badge">{inv.status.replaceAll('_', ' ')}</span>
                 </td>

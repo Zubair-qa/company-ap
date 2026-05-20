@@ -43,9 +43,12 @@ let PaymentsService = class PaymentsService {
         }
         const key = this.config.get('STRIPE_SECRET_KEY');
         if (!key || key.includes('replace_me')) {
-            throw new common_1.BadRequestException('Stripe is not configured. Set STRIPE_SECRET_KEY in api/.env');
+            if (this.isSandboxMode()) {
+                return this.createSandboxCheckoutSession(invoiceId);
+            }
+            throw new common_1.BadRequestException('Stripe is not configured. Set STRIPE_SECRET_KEY in api/.env or enable STRIPE_SANDBOX_MODE=true');
         }
-        const rupees = Number(inv.amountPkr);
+        const rupees = Number(inv.totalAmountPkr);
         if (!Number.isFinite(rupees) || rupees <= 0) {
             throw new common_1.BadRequestException('Invalid invoice amount');
         }
@@ -80,6 +83,25 @@ let PaymentsService = class PaymentsService {
         });
         return { url: session.url, sessionId: session.id };
     }
+    async completeSandboxPayment(invoiceId, dto) {
+        if (!this.isSandboxMode()) {
+            throw new common_1.BadRequestException('Stripe sandbox mode is not enabled');
+        }
+        const cardNumber = (dto.cardNumber ?? '').replace(/\D/g, '');
+        if (cardNumber !== '4242424242424242') {
+            throw new common_1.BadRequestException('Use Stripe test card 4242 4242 4242 4242');
+        }
+        if (!dto.expiry || !dto.cvc) {
+            throw new common_1.BadRequestException('Expiry and CVC are required for sandbox payment');
+        }
+        const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+        if (!inv)
+            throw new common_1.NotFoundException();
+        if (inv.status !== client_1.InvoiceStatus.PAYMENT_INITIATED) {
+            throw new common_1.BadRequestException('Invoice payment has not been initiated');
+        }
+        return this.invoices.markPaidFromStripe(invoiceId, inv.stripeCheckoutSessionId || `cs_test_sandbox_${invoiceId}`, `pi_test_sandbox_${Date.now()}`);
+    }
     async handleStripeWebhook(req, signature) {
         const secret = this.config.get('STRIPE_WEBHOOK_SECRET');
         if (!secret) {
@@ -111,6 +133,24 @@ let PaymentsService = class PaymentsService {
             }
         }
         return { received: true };
+    }
+    async createSandboxCheckoutSession(invoiceId) {
+        const sessionId = `cs_test_sandbox_${Date.now()}`;
+        const frontend = this.config.get('FRONTEND_URL') || 'http://localhost:5173';
+        await this.prisma.invoice.update({
+            where: { id: invoiceId },
+            data: {
+                status: client_1.InvoiceStatus.PAYMENT_INITIATED,
+                stripeCheckoutSessionId: sessionId,
+            },
+        });
+        const url = new URL('/payments/sandbox', frontend);
+        url.searchParams.set('invoice_id', invoiceId);
+        url.searchParams.set('session_id', sessionId);
+        return { url: url.toString(), sessionId };
+    }
+    isSandboxMode() {
+        return this.config.get('STRIPE_SANDBOX_MODE') === 'true';
     }
 };
 exports.PaymentsService = PaymentsService;

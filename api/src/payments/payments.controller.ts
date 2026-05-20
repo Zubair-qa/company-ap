@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Headers,
   Param,
@@ -32,5 +33,15 @@ export class PaymentsController {
   @Roles(Role.COMPANY_ADMIN, Role.AP_CLERK)
   createCheckout(@Param('invoiceId') invoiceId: string) {
     return this.payments.createCheckoutSession(invoiceId);
+  }
+
+  @Post('invoice/:invoiceId/sandbox-complete')
+  @UseGuards(RolesGuard)
+  @Roles(Role.COMPANY_ADMIN, Role.AP_CLERK)
+  completeSandboxPayment(
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { cardNumber?: string; expiry?: string; cvc?: string },
+  ) {
+    return this.payments.completeSandboxPayment(invoiceId, body);
   }
 }

@@ -8,6 +8,7 @@ type InvoiceRow = {
   id: string;
   reference: string | null;
   amountPkr: string;
+  totalAmountPkr: string;
   status: string;
   createdAt?: string;
   dueDate?: string | null;
@@ -60,7 +61,7 @@ const pendingStatuses = new Set([
 ]);
 
 function amountOf(invoice: InvoiceRow) {
-  const amount = Number(invoice.amountPkr);
+  const amount = Number(invoice.totalAmountPkr ?? invoice.amountPkr);
   return Number.isFinite(amount) ? amount : 0;
 }
 

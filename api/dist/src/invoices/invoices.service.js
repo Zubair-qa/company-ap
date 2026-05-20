@@ -25,6 +25,14 @@ const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif
 function uploadRoot() {
     return process.env.UPLOAD_DIR || './uploads';
 }
+function decimal(value) {
+    return new client_1.Prisma.Decimal(value);
+}
+function calculateTotalAmountPkr(amountPkr, whtTax, salesTax, incomeTax) {
+    const amount = decimal(amountPkr);
+    const taxPercent = decimal(whtTax).plus(salesTax).plus(incomeTax);
+    return amount.plus(amount.mul(taxPercent).div(100)).toDecimalPlaces(2);
+}
 const invoiceInclude = client_1.Prisma.validator()({
     vendor: true,
     department: true,
@@ -81,6 +89,7 @@ let InvoicesService = class InvoicesService {
                 mimeType: file.mimetype,
                 extracted: extracted,
                 amountPkr,
+                totalAmountPkr: calculateTotalAmountPkr(amountPkr, 0, 0, 0),
                 reference,
                 description,
                 status,
@@ -151,6 +160,20 @@ let InvoicesService = class InvoicesService {
         const data = {};
         if (dto.amountPkr != null)
             data.amountPkr = new client_1.Prisma.Decimal(dto.amountPkr);
+        if (dto.taxFilerStatus != null)
+            data.taxFilerStatus = dto.taxFilerStatus;
+        if (dto.whtTax != null)
+            data.whtTax = new client_1.Prisma.Decimal(dto.whtTax);
+        if (dto.salesTax != null)
+            data.salesTax = new client_1.Prisma.Decimal(dto.salesTax);
+        if (dto.incomeTax != null)
+            data.incomeTax = new client_1.Prisma.Decimal(dto.incomeTax);
+        if (dto.amountPkr != null ||
+            dto.whtTax != null ||
+            dto.salesTax != null ||
+            dto.incomeTax != null) {
+            data.totalAmountPkr = calculateTotalAmountPkr(dto.amountPkr ?? inv.amountPkr, dto.whtTax ?? inv.whtTax, dto.salesTax ?? inv.salesTax, dto.incomeTax ?? inv.incomeTax);
+        }
         if (dto.reference !== undefined)
             data.reference = dto.reference;
         if (dto.description !== undefined)
@@ -264,6 +287,7 @@ let InvoicesService = class InvoicesService {
                 submittedById,
                 extracted: extracted,
                 amountPkr: new client_1.Prisma.Decimal(extracted.amountPkr ?? 0),
+                totalAmountPkr: calculateTotalAmountPkr(extracted.amountPkr ?? 0, 0, 0, 0),
                 reference: extracted.reference ?? null,
                 description: extracted.description ?? 'Imported from published spreadsheet (CSV) URL',
                 mimeType: 'text/csv',

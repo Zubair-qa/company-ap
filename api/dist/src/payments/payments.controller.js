@@ -30,6 +30,9 @@ let PaymentsController = class PaymentsController {
     createCheckout(invoiceId) {
         return this.payments.createCheckoutSession(invoiceId);
     }
+    completeSandboxPayment(invoiceId, body) {
+        return this.payments.completeSandboxPayment(invoiceId, body);
+    }
 };
 exports.PaymentsController = PaymentsController;
 __decorate([
@@ -50,6 +53,16 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], PaymentsController.prototype, "createCheckout", null);
+__decorate([
+    (0, common_1.Post)('invoice/:invoiceId/sandbox-complete'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK),
+    __param(0, (0, common_1.Param)('invoiceId')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], PaymentsController.prototype, "completeSandboxPayment", null);
 exports.PaymentsController = PaymentsController = __decorate([
     (0, common_1.Controller)('payments'),
     __metadata("design:paramtypes", [payments_service_1.PaymentsService])

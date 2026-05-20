@@ -30,6 +30,11 @@ enum InvoiceStatus {
   PAID
 }
 
+enum TaxFilerStatus {
+  FILER
+  NON_FILER
+}
+
 model Department {
   id       String    @id @default(uuid())
   name     String
@@ -67,6 +72,11 @@ model Invoice {
   id                 String        @id @default(uuid())
   reference          String?
   amountPkr          Decimal       @db.Decimal(14, 2)
+  taxFilerStatus     TaxFilerStatus @default(FILER)
+  whtTax             Decimal       @default(0) @db.Decimal(7, 2)
+  salesTax           Decimal       @default(0) @db.Decimal(7, 2)
+  incomeTax          Decimal       @default(0) @db.Decimal(7, 2)
+  totalAmountPkr     Decimal       @default(0) @db.Decimal(14, 2)
   dueDate            DateTime?
   description        String?
   status             InvoiceStatus @default(UPLOADED)

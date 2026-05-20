@@ -9,7 +9,9 @@ import { useAuth } from '../auth/AuthProvider';
 const roles = [
   { value: 'COMPANY_ADMIN', label: 'Company admin' },
   { value: 'AP_CLERK', label: 'AP clerk' },
-  { value: 'DEPT_ADMIN', label: 'Department admin' },
+  { value: 'DEPT_USER', label: 'Department user' },
+  { value: 'DEPT_ADMIN', label: 'Department head' },
+  { value: 'CFO', label: 'CFO' },
 ];
 
 export function RegisterPage() {

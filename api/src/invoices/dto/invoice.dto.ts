@@ -25,6 +25,10 @@ export class CreateVendorBodyDto {
 export class PatchInvoiceDto {
   @IsOptional()
   @IsString()
+  invoiceNumber?: string;
+
+  @IsOptional()
+  @IsString()
   reference?: string;
 
   @IsOptional()
@@ -48,9 +52,48 @@ export class PatchInvoiceDto {
   @IsOptional()
   @IsString()
   dueDate?: string;
+
+  @IsOptional()
+  @IsString()
+  invoiceDate?: string;
+
+  @IsOptional()
+  @IsString()
+  receivedDate?: string;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  subtotal?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  taxAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  withholdingTax?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  totalAmount?: number;
 }
 
 export class GoogleCsvDto {
   @IsString()
   url: string;
+
+  @IsString()
+  departmentId: string;
 }

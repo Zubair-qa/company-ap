@@ -5,7 +5,11 @@ import { DashboardPage } from './pages/DashboardPage';
 import { InvoiceDetailPage } from './pages/InvoiceDetailPage';
 import { InvoicesPage } from './pages/InvoicesPage';
 import { LoginPage } from './pages/LoginPage';
-import { PaymentCancelPage, PaymentSuccessPage } from './pages/PaymentPages';
+import {
+  PaymentCancelPage,
+  PaymentSandboxPage,
+  PaymentSuccessPage,
+} from './pages/PaymentPages';
 import { RegisterPage } from './pages/RegisterPage';
 import { UploadPage } from './pages/UploadPage';
 
@@ -22,6 +26,7 @@ export default function App() {
           <Route path="/invoices" element={<InvoicesPage />} />
           <Route path="/upload" element={<UploadPage />} />
           <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+          <Route path="/payments/sandbox" element={<PaymentSandboxPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

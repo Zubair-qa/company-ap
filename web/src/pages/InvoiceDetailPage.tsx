@@ -14,7 +14,6 @@ type InvoiceDetail = {
   amountPkr: string;
   status: string;
   description: string | null;
-  extracted: unknown;
   departmentId: string;
   vendorId: string | null;
   department: { name: string };
@@ -90,7 +89,7 @@ export function InvoiceDetailPage() {
 
   const pay = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post<{ url: string | null }>(
+      const { data } = await api.post<{ url: string | null; sessionId?: string }>(
         `/api/payments/invoice/${id}/checkout`,
       );
       return data;
@@ -151,12 +150,6 @@ export function InvoiceDetailPage() {
             <strong>Description:</strong> {inv.description}
           </p>
         ) : null}
-        <details style={{ marginTop: '0.75rem' }}>
-          <summary>Extracted JSON</summary>
-          <pre style={{ fontSize: 12, overflow: 'auto' }}>
-            {JSON.stringify(inv.extracted, null, 2)}
-          </pre>
-        </details>
       </div>
 
       {canEdit ? editForm : null}
@@ -211,8 +204,15 @@ export function InvoiceDetailPage() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Pay with Stripe</h3>
           <p className="muted">
-            Opens Stripe Checkout in PKR. Configure <code>STRIPE_SECRET_KEY</code> on the API.
+            Opens Stripe Checkout in PKR.
           </p>
+          <div className="payment-mode-panel">
+            <strong>Payment mode: Stripe sandbox</strong>
+            <span>
+              Test card <code>4242 4242 4242 4242</code>
+            </span>
+            <small>Use any future expiry date and any CVC.</small>
+          </div>
           <button
             type="button"
             className="btn btn-primary"

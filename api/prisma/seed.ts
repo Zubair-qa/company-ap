@@ -1,0 +1,966 @@
+import {
+  AccountVerificationStatus,
+  BankPaymentStatus,
+  BillType,
+  DocumentStatus,
+  ExpenseNature,
+  FilerStatus,
+  InvoiceStatus,
+  PaymentMethod,
+  PaymentBatchStatus,
+  PaymentRecordStatus,
+  Prisma,
+  PrismaClient,
+  PurchaseOrderStatus,
+  ReconciliationStatus,
+  Role,
+  TaxCodeType,
+  TicketPriority,
+  TicketStatus,
+  VendorKind,
+  XeroSyncStatus,
+} from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+
+const prisma = new PrismaClient();
+
+async function main() {
+  const passwordHash = await bcrypt.hash('changeme123', 10);
+
+  const admin = await prisma.department.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000003' },
+    update: { code: 'ADM', name: 'Admin', active: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000003',
+      code: 'ADM',
+      name: 'Admin',
+    },
+  });
+
+  const engineering = await prisma.department.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000001' },
+    update: { code: 'ENG', name: 'Engineering', active: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000001',
+      code: 'ENG',
+      name: 'Engineering',
+    },
+  });
+
+  const finance = await prisma.department.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000002' },
+    update: { code: 'FIN', name: 'Finance', active: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000002',
+      code: 'FIN',
+      name: 'Finance',
+    },
+  });
+
+  const companyAdmin = await prisma.user.upsert({
+    where: { email: 'admin@demo.local' },
+    update: {
+      name: 'Company Admin',
+      passwordHash,
+      role: Role.COMPANY_ADMIN,
+      departmentId: admin.id,
+    },
+    create: {
+      email: 'admin@demo.local',
+      name: 'Company Admin',
+      passwordHash,
+      role: Role.COMPANY_ADMIN,
+      departmentId: admin.id,
+    },
+  });
+
+  const apClerk = await prisma.user.upsert({
+    where: { email: 'ap@demo.local' },
+    update: {
+      name: 'AP Clerk',
+      passwordHash,
+      role: Role.AP_CLERK,
+      departmentId: finance.id,
+    },
+    create: {
+      email: 'ap@demo.local',
+      name: 'AP Clerk',
+      passwordHash,
+      role: Role.AP_CLERK,
+      departmentId: finance.id,
+    },
+  });
+
+  const cfo = await prisma.user.upsert({
+    where: { email: 'cfo@demo.local' },
+    update: {
+      name: 'CFO',
+      passwordHash,
+      role: Role.CFO,
+      departmentId: finance.id,
+    },
+    create: {
+      email: 'cfo@demo.local',
+      name: 'CFO',
+      passwordHash,
+      role: Role.CFO,
+      departmentId: finance.id,
+    },
+  });
+
+  const engineeringAdmin = await prisma.user.upsert({
+    where: { email: 'eng-admin@demo.local' },
+    update: {
+      name: 'Engineering Dept Admin',
+      passwordHash,
+      role: Role.DEPT_ADMIN,
+      departmentId: engineering.id,
+    },
+    create: {
+      email: 'eng-admin@demo.local',
+      name: 'Engineering Dept Admin',
+      passwordHash,
+      role: Role.DEPT_ADMIN,
+      departmentId: engineering.id,
+    },
+  });
+
+  const engineeringUser = await prisma.user.upsert({
+    where: { email: 'eng-user@demo.local' },
+    update: {
+      name: 'Engineering Requester',
+      passwordHash,
+      role: Role.DEPT_USER,
+      departmentId: engineering.id,
+    },
+    create: {
+      email: 'eng-user@demo.local',
+      name: 'Engineering Requester',
+      passwordHash,
+      role: Role.DEPT_USER,
+      departmentId: engineering.id,
+    },
+  });
+
+  const financeAdmin = await prisma.user.upsert({
+    where: { email: 'finance-admin@demo.local' },
+    update: {
+      name: 'Finance Dept Admin',
+      passwordHash,
+      role: Role.DEPT_ADMIN,
+      departmentId: finance.id,
+    },
+    create: {
+      email: 'finance-admin@demo.local',
+      name: 'Finance Dept Admin',
+      passwordHash,
+      role: Role.DEPT_ADMIN,
+      departmentId: finance.id,
+    },
+  });
+
+  const financeUser = await prisma.user.upsert({
+    where: { email: 'finance-user@demo.local' },
+    update: {
+      name: 'Finance Requester',
+      passwordHash,
+      role: Role.DEPT_USER,
+      departmentId: finance.id,
+    },
+    create: {
+      email: 'finance-user@demo.local',
+      name: 'Finance Requester',
+      passwordHash,
+      role: Role.DEPT_USER,
+      departmentId: finance.id,
+    },
+  });
+
+  const cloudHost = await prisma.vendor.upsert({
+    where: { id: '10000000-0000-0000-0000-000000000001' },
+    update: {
+      vendorCode: 'VEN-CLOUDHOST',
+      bankName: 'Meezan Bank',
+      bankAccountTitle: 'CloudHost Limited',
+      iban: 'PK12MEZN0000000012345678',
+      bankAccountNumber: '0000000012345678',
+      paymentTermsDays: 15,
+      withholdingTaxRate: new Prisma.Decimal('4.5'),
+    },
+    create: {
+      id: '10000000-0000-0000-0000-000000000001',
+      vendorCode: 'VEN-CLOUDHOST',
+      displayName: 'CloudHost Ltd',
+      legalName: 'CloudHost Limited',
+      taxNumber: 'NTN-1234567',
+      ntn: '1234567',
+      bankName: 'Meezan Bank',
+      bankAccountTitle: 'CloudHost Limited',
+      iban: 'PK12MEZN0000000012345678',
+      bankAccountNumber: '0000000012345678',
+      paymentTermsDays: 15,
+      withholdingTaxRate: new Prisma.Decimal('4.5'),
+      kind: VendorKind.RECURRING,
+    },
+  });
+
+  const consultant = await prisma.vendor.upsert({
+    where: { id: '10000000-0000-0000-0000-000000000002' },
+    update: {
+      vendorCode: 'VEN-CONSULTANT',
+      bankName: 'Meezan Bank',
+      bankAccountTitle: 'Ad-hoc Consultant',
+      iban: 'PK77MEZN0000000098765432',
+      bankAccountNumber: '0000000098765432',
+      paymentTermsDays: 7,
+      withholdingTaxRate: new Prisma.Decimal('10'),
+    },
+    create: {
+      id: '10000000-0000-0000-0000-000000000002',
+      vendorCode: 'VEN-CONSULTANT',
+      displayName: 'Ad-hoc Consultant',
+      bankName: 'Meezan Bank',
+      bankAccountTitle: 'Ad-hoc Consultant',
+      iban: 'PK77MEZN0000000098765432',
+      bankAccountNumber: '0000000098765432',
+      paymentTermsDays: 7,
+      withholdingTaxRate: new Prisma.Decimal('10'),
+      kind: VendorKind.ONE_OFF,
+    },
+  });
+
+  await prisma.taxCode.upsert({
+    where: { code: 'WHT-FILER-4.5' },
+    update: {
+      name: 'Withholding tax filer',
+      rate: new Prisma.Decimal('4.5'),
+      type: TaxCodeType.WITHHOLDING,
+      active: true,
+    },
+    create: {
+      code: 'WHT-FILER-4.5',
+      name: 'Withholding tax filer',
+      rate: new Prisma.Decimal('4.5'),
+      type: TaxCodeType.WITHHOLDING,
+    },
+  });
+
+  await prisma.taxCode.upsert({
+    where: { code: 'WHT-NON-FILER-10' },
+    update: {
+      name: 'Withholding tax non filer',
+      rate: new Prisma.Decimal('10'),
+      type: TaxCodeType.WITHHOLDING,
+      active: true,
+    },
+    create: {
+      code: 'WHT-NON-FILER-10',
+      name: 'Withholding tax non filer',
+      rate: new Prisma.Decimal('10'),
+      type: TaxCodeType.WITHHOLDING,
+    },
+  });
+
+  await prisma.glAccount.upsert({
+    where: { accountCode: '500' },
+    update: {
+      accountName: 'Operating expenses',
+      accountType: 'EXPENSE',
+      active: true,
+    },
+    create: {
+      accountCode: '500',
+      accountName: 'Operating expenses',
+      accountType: 'EXPENSE',
+    },
+  });
+
+  await prisma.glAccount.upsert({
+    where: { accountCode: '520' },
+    update: {
+      accountName: 'Repair and maintenance',
+      accountType: 'EXPENSE',
+      active: true,
+    },
+    create: {
+      accountCode: '520',
+      accountName: 'Repair and maintenance',
+      accountType: 'EXPENSE',
+    },
+  });
+
+  await prisma.approvalMatrix.upsert({
+    where: { id: 'am-00000000-0000-0000-0000-000000000001' },
+    update: {
+      departmentId: finance.id,
+      minAmount: new Prisma.Decimal('0'),
+      maxAmount: new Prisma.Decimal('100000'),
+      requiredRole: Role.DEPT_ADMIN,
+      approvalLevel: 1,
+      active: true,
+    },
+    create: {
+      id: 'am-00000000-0000-0000-0000-000000000001',
+      departmentId: finance.id,
+      minAmount: new Prisma.Decimal('0'),
+      maxAmount: new Prisma.Decimal('100000'),
+      requiredRole: Role.DEPT_ADMIN,
+      approvalLevel: 1,
+    },
+  });
+
+  await prisma.approvalMatrix.upsert({
+    where: { id: 'am-00000000-0000-0000-0000-000000000002' },
+    update: {
+      departmentId: null,
+      minAmount: new Prisma.Decimal('100001'),
+      maxAmount: new Prisma.Decimal('999999999'),
+      requiredRole: Role.COMPANY_ADMIN,
+      approvalLevel: 2,
+      active: true,
+    },
+    create: {
+      id: 'am-00000000-0000-0000-0000-000000000002',
+      minAmount: new Prisma.Decimal('100001'),
+      maxAmount: new Prisma.Decimal('999999999'),
+      requiredRole: Role.COMPANY_ADMIN,
+      approvalLevel: 2,
+    },
+  });
+
+  const cloudPo = await prisma.purchaseOrder.upsert({
+    where: { poNumber: 'PO-ENG-088' },
+    update: {
+      vendorId: cloudHost.id,
+      departmentId: engineering.id,
+      requestedByUserId: engineeringAdmin.id,
+      poDate: new Date('2026-05-10T00:00:00.000Z'),
+      subtotal: new Prisma.Decimal('425000'),
+      totalAmount: new Prisma.Decimal('425000'),
+      status: PurchaseOrderStatus.APPROVED,
+      notes: 'Covers 50% advance and 50% remaining payment references.',
+    },
+    create: {
+      poNumber: 'PO-ENG-088',
+      vendorId: cloudHost.id,
+      departmentId: engineering.id,
+      requestedByUserId: engineeringAdmin.id,
+      poDate: new Date('2026-05-10T00:00:00.000Z'),
+      subtotal: new Prisma.Decimal('425000'),
+      totalAmount: new Prisma.Decimal('425000'),
+      status: PurchaseOrderStatus.APPROVED,
+      notes: 'Covers 50% advance and 50% remaining payment references.',
+      lineItems: {
+        create: {
+          lineNo: 1,
+          description: 'Infrastructure expansion milestone',
+          quantity: new Prisma.Decimal('1'),
+          unitPrice: new Prisma.Decimal('425000'),
+          lineTotal: new Prisma.Decimal('425000'),
+          glAccountCode: '500',
+        },
+      },
+    },
+  });
+
+  const demoInvoices = [
+    {
+      id: '20000000-0000-0000-0000-000000000001',
+      reference: 'FIN-2026-104',
+      amountPkr: '185000',
+      description: 'Monthly cloud hosting retainer',
+      status: InvoiceStatus.AWAITING_APPROVAL,
+      departmentId: finance.id,
+      submittedById: apClerk.id,
+      vendorId: cloudHost.id,
+      dueDate: new Date('2026-05-28T00:00:00.000Z'),
+      extracted: {
+        vendorName: 'CloudHost Ltd',
+        vendorTaxNumber: 'NTN-1234567',
+        reference: 'FIN-2026-104',
+        amountPkr: 185000,
+      },
+    },
+    {
+      id: '20000000-0000-0000-0000-000000000002',
+      reference: 'ENG-2026-088',
+      amountPkr: '425000',
+      description: 'Infrastructure expansion milestone',
+      status: InvoiceStatus.APPROVED,
+      departmentId: engineering.id,
+      submittedById: apClerk.id,
+      vendorId: cloudHost.id,
+      dueDate: new Date('2026-06-03T00:00:00.000Z'),
+      extracted: {
+        vendorName: 'CloudHost Ltd',
+        vendorTaxNumber: 'NTN-1234567',
+        reference: 'ENG-2026-088',
+        amountPkr: 425000,
+      },
+    },
+    {
+      id: '20000000-0000-0000-0000-000000000003',
+      reference: 'ADM-2026-014',
+      amountPkr: '62000',
+      description: 'Office systems support',
+      status: InvoiceStatus.VENDOR_UNVERIFIED,
+      departmentId: admin.id,
+      submittedById: companyAdmin.id,
+      vendorId: null,
+      dueDate: new Date('2026-05-25T00:00:00.000Z'),
+      extracted: {
+        vendorName: 'Office Pro Services',
+        reference: 'ADM-2026-014',
+        amountPkr: 62000,
+      },
+    },
+    {
+      id: '20000000-0000-0000-0000-000000000004',
+      reference: 'FIN-2026-109',
+      amountPkr: '94000',
+      description: 'Quarterly compliance review',
+      status: InvoiceStatus.VENDOR_VERIFIED,
+      departmentId: finance.id,
+      submittedById: apClerk.id,
+      vendorId: consultant.id,
+      dueDate: new Date('2026-06-10T00:00:00.000Z'),
+      extracted: {
+        vendorName: 'Ad-hoc Consultant',
+        reference: 'FIN-2026-109',
+        amountPkr: 94000,
+      },
+    },
+    {
+      id: '20000000-0000-0000-0000-000000000005',
+      reference: 'ENG-2026-091',
+      amountPkr: '145000',
+      description: 'Prototype review workshop',
+      status: InvoiceStatus.PAID,
+      departmentId: engineering.id,
+      submittedById: apClerk.id,
+      vendorId: consultant.id,
+      dueDate: new Date('2026-05-16T00:00:00.000Z'),
+      extracted: {
+        vendorName: 'Ad-hoc Consultant',
+        reference: 'ENG-2026-091',
+        amountPkr: 145000,
+      },
+    },
+  ];
+
+  for (const invoice of demoInvoices) {
+    const invoiceTotal = new Prisma.Decimal(invoice.amountPkr);
+    const data = {
+      internalRef: `AP-${invoice.reference}`,
+      invoiceNumber: invoice.reference,
+      reference: invoice.reference,
+      amountPkr: invoiceTotal,
+      subtotal: invoiceTotal,
+      totalAmount: invoiceTotal,
+      balanceDue:
+        invoice.status === InvoiceStatus.PAID ? new Prisma.Decimal('0') : invoiceTotal,
+      description: invoice.description,
+      status: invoice.status,
+      departmentId: invoice.departmentId,
+      submittedById: invoice.submittedById,
+      vendorId: invoice.vendorId,
+      poId: invoice.reference === 'ENG-2026-088' ? cloudPo.id : null,
+      dueDate: invoice.dueDate,
+      extracted: invoice.extracted as Prisma.InputJsonValue,
+    };
+
+    await prisma.invoice.upsert({
+      where: { id: invoice.id },
+      update: data,
+      create: {
+        id: invoice.id,
+        ...data,
+      },
+    });
+  }
+
+  const demoTickets = [
+    {
+      id: '30000000-0000-0000-0000-000000000001',
+      title: 'FIN-2026-104 - CloudHost monthly hosting',
+      status: TicketStatus.CFO_SIGN_PENDING,
+      priority: TicketPriority.HIGH,
+      requesterName: 'Finance requester',
+      requesterEmail: 'requester.finance@demo.local',
+      departmentId: finance.id,
+      assignedToId: cfo.id,
+      createdById: apClerk.id,
+      submittedToFinanceAt: new Date('2026-05-19T09:45:00.000Z'),
+      dueDate: new Date('2026-05-22T13:00:00.000Z'),
+      expenseNature: ExpenseNature.SOFTWARE_CLOUD,
+      billType: BillType.STANDARD_INVOICE,
+      vendorId: cloudHost.id,
+      vendorNameSnapshot: 'CloudHost Ltd',
+      purchaseOrderNumber: 'PO-FIN-104',
+      purchaseOrderRequired: true,
+      purchaseOrderVerified: true,
+      invoiceNumber: 'FIN-2026-104',
+      internalReference: 'AP-FIN-0001',
+      amountPkr: '185000',
+      paymentMethod: PaymentMethod.BANK_PORTAL,
+      vendorAccountNumber: 'PK12MEZN0000000012345678',
+      invoiceAccountNumber: 'PK12MEZN0000000012345678',
+      accountVerificationStatus: AccountVerificationStatus.MATCHED,
+      accountVerificationSource: 'Invoice matched vendor master',
+      documentStatus: DocumentStatus.COMPLETE,
+      missingDocuments: [],
+      xeroSyncStatus: XeroSyncStatus.BILL_CREATED,
+      xeroContactId: 'xero-contact-cloudhost',
+      xeroBillId: 'xero-bill-fin-104',
+      xeroBillNumber: 'XBILL-FIN-104',
+      whtFilerStatus: FilerStatus.FILER,
+      whtRate: '4.5',
+      whtAmountPkr: '8325',
+      netPayablePkr: '176675',
+      voucherNumber: 'VCH-2026-0519-001',
+      voucherGeneratedAt: new Date('2026-05-19T11:30:00.000Z'),
+      bankPaymentStatus: BankPaymentStatus.UPLOADED,
+      bankPortalReference: 'MZN-UP-8821',
+      bankUploadedAt: new Date('2026-05-19T12:10:00.000Z'),
+      trelloCardId: 'trello-fin-104',
+      trelloUrl: 'https://trello.example/cards/fin-104',
+      legacySheetRowId: '42',
+      legacySheetName: 'AP Tracker V2',
+      oldReference: 'GS-FIN-104',
+      invoiceId: '20000000-0000-0000-0000-000000000001',
+      notes: 'Awaiting CFO sign in Meezan bank portal.',
+    },
+    {
+      id: '30000000-0000-0000-0000-000000000002',
+      title: 'Admin repair maintenance bill - docs missing',
+      status: TicketStatus.MISSING_DOCS,
+      priority: TicketPriority.URGENT,
+      requesterName: 'Admin requester',
+      requesterEmail: 'requester.admin@demo.local',
+      departmentId: admin.id,
+      assignedToId: apClerk.id,
+      createdById: companyAdmin.id,
+      submittedToFinanceAt: new Date('2026-05-19T12:30:00.000Z'),
+      dueDate: new Date('2026-05-23T13:00:00.000Z'),
+      expenseNature: ExpenseNature.REPAIR_MAINTENANCE,
+      billType: BillType.CASH_SLIP,
+      vendorId: null,
+      vendorNameSnapshot: 'Office Pro Services',
+      purchaseOrderNumber: null,
+      purchaseOrderRequired: true,
+      purchaseOrderVerified: false,
+      invoiceNumber: 'ADM-2026-014',
+      internalReference: 'AP-ADM-0002',
+      amountPkr: '62000',
+      paymentMethod: PaymentMethod.CHEQUE,
+      vendorAccountNumber: null,
+      invoiceAccountNumber: null,
+      accountVerificationStatus: AccountVerificationStatus.NEEDS_MANUAL_REVIEW,
+      accountVerificationSource: 'Invoice does not show account number; verify from old Excel sheet',
+      documentStatus: DocumentStatus.INCOMPLETE,
+      missingDocuments: [
+        'Purchase order',
+        'Vendor account proof',
+        'Clear invoice scan',
+      ],
+      xeroSyncStatus: XeroSyncStatus.NOT_READY,
+      whtFilerStatus: FilerStatus.UNKNOWN,
+      whtRate: null,
+      whtAmountPkr: null,
+      netPayablePkr: '62000',
+      voucherNumber: null,
+      voucherGeneratedAt: null,
+      bankPaymentStatus: BankPaymentStatus.NOT_READY,
+      bankPortalReference: null,
+      trelloCardId: 'trello-adm-014',
+      trelloUrl: 'https://trello.example/cards/adm-014',
+      legacySheetRowId: '77',
+      legacySheetName: 'Old AP Sheet',
+      oldReference: 'OLD-ADM-014',
+      invoiceId: '20000000-0000-0000-0000-000000000003',
+      notes: 'Requester pinged for missing repair maintenance documents.',
+    },
+    {
+      id: '30000000-0000-0000-0000-000000000003',
+      title: 'ENG-2026-088 - CloudHost 50% advance paid',
+      status: TicketStatus.PAYMENT_COMPLETE,
+      priority: TicketPriority.NORMAL,
+      requesterName: 'Engineering requester',
+      requesterEmail: 'requester.eng@demo.local',
+      departmentId: engineering.id,
+      assignedToId: apClerk.id,
+      createdById: engineeringAdmin.id,
+      submittedToFinanceAt: new Date('2026-05-14T08:00:00.000Z'),
+      dueDate: new Date('2026-05-17T13:00:00.000Z'),
+      expenseNature: ExpenseNature.CAPEX,
+      billType: BillType.ADVANCE_PARTIAL,
+      vendorId: cloudHost.id,
+      vendorNameSnapshot: 'CloudHost Ltd',
+      purchaseOrderNumber: 'PO-ENG-088',
+      purchaseOrderRequired: true,
+      purchaseOrderVerified: true,
+      invoiceNumber: 'ENG-2026-088',
+      internalReference: 'AP-ENG-0003',
+      amountPkr: '212500',
+      paymentMethod: PaymentMethod.BANK_PORTAL,
+      vendorAccountNumber: 'PK12MEZN0000000012345678',
+      invoiceAccountNumber: 'PK12MEZN0000000012345678',
+      accountVerificationStatus: AccountVerificationStatus.MATCHED,
+      accountVerificationSource: 'Invoice matched vendor master',
+      documentStatus: DocumentStatus.COMPLETE,
+      missingDocuments: [],
+      xeroSyncStatus: XeroSyncStatus.PAID_MARKED,
+      xeroContactId: 'xero-contact-cloudhost',
+      xeroBillId: 'xero-bill-eng-088-advance',
+      xeroBillNumber: 'XBILL-ENG-088-A',
+      xeroPaymentId: 'xero-payment-eng-088-a',
+      whtFilerStatus: FilerStatus.FILER,
+      whtRate: '4.5',
+      whtAmountPkr: '9562.50',
+      netPayablePkr: '202937.50',
+      voucherNumber: 'VCH-2026-0514-004',
+      voucherGeneratedAt: new Date('2026-05-14T10:45:00.000Z'),
+      bankPaymentStatus: BankPaymentStatus.EXECUTED,
+      bankPortalReference: 'MZN-EX-6642',
+      bankExecutedAt: new Date('2026-05-15T10:00:00.000Z'),
+      requesterNotifiedAt: new Date('2026-05-15T10:45:00.000Z'),
+      legacySheetRowId: '101',
+      legacySheetName: 'Old AP Sheet',
+      oldReference: 'OLD-ENG-088-A',
+      invoiceId: null,
+      notes: 'Parent ticket for the 50% advance payment.',
+    },
+    {
+      id: '30000000-0000-0000-0000-000000000004',
+      title: 'ENG-2026-088 - CloudHost remaining 50%',
+      status: TicketStatus.DOCS_REVIEW,
+      priority: TicketPriority.HIGH,
+      requesterName: 'Engineering requester',
+      requesterEmail: 'requester.eng@demo.local',
+      departmentId: engineering.id,
+      assignedToId: apClerk.id,
+      createdById: engineeringAdmin.id,
+      submittedToFinanceAt: new Date('2026-05-19T12:20:00.000Z'),
+      dueDate: new Date('2026-05-23T13:00:00.000Z'),
+      expenseNature: ExpenseNature.CAPEX,
+      billType: BillType.FINAL_PARTIAL,
+      vendorId: cloudHost.id,
+      vendorNameSnapshot: 'CloudHost Ltd',
+      purchaseOrderNumber: 'PO-ENG-088',
+      purchaseOrderRequired: true,
+      purchaseOrderVerified: true,
+      invoiceNumber: 'ENG-2026-088',
+      internalReference: 'AP-ENG-0004',
+      amountPkr: '212500',
+      paymentMethod: PaymentMethod.BANK_PORTAL,
+      vendorAccountNumber: 'PK12MEZN0000000012345678',
+      invoiceAccountNumber: null,
+      accountVerificationStatus: AccountVerificationStatus.INVOICE_MISSING_VERIFIED_FROM_SHEET,
+      accountVerificationSource: 'Remaining payment references old sheet row 101',
+      documentStatus: DocumentStatus.PENDING_REVIEW,
+      missingDocuments: [],
+      xeroSyncStatus: XeroSyncStatus.NOT_READY,
+      whtFilerStatus: FilerStatus.FILER,
+      whtRate: '4.5',
+      whtAmountPkr: '9562.50',
+      netPayablePkr: '202937.50',
+      voucherNumber: null,
+      voucherGeneratedAt: null,
+      bankPaymentStatus: BankPaymentStatus.NOT_READY,
+      bankPortalReference: null,
+      legacySheetRowId: '102',
+      legacySheetName: 'AP Tracker V2',
+      oldReference: 'OLD-ENG-088-A',
+      parentTicketId: '30000000-0000-0000-0000-000000000003',
+      invoiceId: '20000000-0000-0000-0000-000000000002',
+      notes: 'Remaining 50% linked back to the paid advance ticket.',
+    },
+    {
+      id: '30000000-0000-0000-0000-000000000005',
+      title: 'FIN-2026-109 - consultant WHT and voucher',
+      status: TicketStatus.WHT_CALCULATION,
+      priority: TicketPriority.NORMAL,
+      requesterName: 'Finance requester',
+      requesterEmail: 'requester.finance@demo.local',
+      departmentId: finance.id,
+      assignedToId: financeAdmin.id,
+      createdById: apClerk.id,
+      submittedToFinanceAt: new Date('2026-05-19T07:15:00.000Z'),
+      dueDate: new Date('2026-05-22T13:00:00.000Z'),
+      expenseNature: ExpenseNature.PROFESSIONAL_SERVICES,
+      billType: BillType.STANDARD_INVOICE,
+      vendorId: consultant.id,
+      vendorNameSnapshot: 'Ad-hoc Consultant',
+      purchaseOrderNumber: 'PO-FIN-109',
+      purchaseOrderRequired: true,
+      purchaseOrderVerified: true,
+      invoiceNumber: 'FIN-2026-109',
+      internalReference: 'AP-FIN-0005',
+      amountPkr: '94000',
+      paymentMethod: PaymentMethod.CASH,
+      vendorAccountNumber: null,
+      invoiceAccountNumber: null,
+      accountVerificationStatus: AccountVerificationStatus.NOT_CHECKED,
+      accountVerificationSource: null,
+      documentStatus: DocumentStatus.COMPLETE,
+      missingDocuments: [],
+      xeroSyncStatus: XeroSyncStatus.READY_TO_SYNC,
+      whtFilerStatus: FilerStatus.NON_FILER,
+      whtRate: '10',
+      whtAmountPkr: '9400',
+      netPayablePkr: '84600',
+      voucherNumber: null,
+      voucherGeneratedAt: null,
+      bankPaymentStatus: BankPaymentStatus.NOT_READY,
+      bankPortalReference: null,
+      legacySheetRowId: '55',
+      legacySheetName: 'AP Tracker V2',
+      oldReference: 'GS-FIN-109',
+      invoiceId: '20000000-0000-0000-0000-000000000004',
+      notes: 'Non-filer WHT calculation pending before voucher generation.',
+    },
+  ];
+
+  for (const ticket of demoTickets) {
+    const data = {
+      title: ticket.title,
+      status: ticket.status,
+      priority: ticket.priority,
+      requesterName: ticket.requesterName,
+      requesterEmail: ticket.requesterEmail,
+      departmentId: ticket.departmentId,
+      assignedToId: ticket.assignedToId,
+      createdById: ticket.createdById,
+      submittedToFinanceAt: ticket.submittedToFinanceAt,
+      dueDate: ticket.dueDate,
+      expenseNature: ticket.expenseNature,
+      billType: ticket.billType,
+      vendorId: ticket.vendorId,
+      vendorNameSnapshot: ticket.vendorNameSnapshot,
+      purchaseOrderNumber: ticket.purchaseOrderNumber,
+      purchaseOrderRequired: ticket.purchaseOrderRequired,
+      purchaseOrderVerified: ticket.purchaseOrderVerified,
+      invoiceNumber: ticket.invoiceNumber,
+      internalReference: ticket.internalReference,
+      amountPkr: new Prisma.Decimal(ticket.amountPkr),
+      paymentMethod: ticket.paymentMethod,
+      vendorAccountNumber: ticket.vendorAccountNumber,
+      invoiceAccountNumber: ticket.invoiceAccountNumber,
+      accountVerificationStatus: ticket.accountVerificationStatus,
+      accountVerificationSource: ticket.accountVerificationSource,
+      documentStatus: ticket.documentStatus,
+      missingDocuments: ticket.missingDocuments,
+      xeroSyncStatus: ticket.xeroSyncStatus,
+      xeroContactId: ticket.xeroContactId,
+      xeroBillId: ticket.xeroBillId,
+      xeroBillNumber: ticket.xeroBillNumber,
+      xeroPaymentId: ticket.xeroPaymentId ?? null,
+      whtFilerStatus: ticket.whtFilerStatus,
+      whtRate: ticket.whtRate == null ? null : new Prisma.Decimal(ticket.whtRate),
+      whtAmountPkr:
+        ticket.whtAmountPkr == null ? null : new Prisma.Decimal(ticket.whtAmountPkr),
+      netPayablePkr:
+        ticket.netPayablePkr == null ? null : new Prisma.Decimal(ticket.netPayablePkr),
+      voucherNumber: ticket.voucherNumber,
+      voucherGeneratedAt: ticket.voucherGeneratedAt,
+      bankPaymentStatus: ticket.bankPaymentStatus,
+      bankPortalReference: ticket.bankPortalReference,
+      bankUploadedAt: ticket.bankUploadedAt ?? null,
+      cfoSignedAt: null,
+      bankExecutedAt: ticket.bankExecutedAt ?? null,
+      requesterNotifiedAt: ticket.requesterNotifiedAt ?? null,
+      trelloCardId: ticket.trelloCardId ?? null,
+      trelloUrl: ticket.trelloUrl ?? null,
+      legacySheetRowId: ticket.legacySheetRowId,
+      legacySheetName: ticket.legacySheetName,
+      oldReference: ticket.oldReference,
+      parentTicketId: ticket.parentTicketId ?? null,
+      invoiceId: ticket.invoiceId,
+      notes: ticket.notes,
+    };
+
+    await prisma.paymentTicket.upsert({
+      where: { id: ticket.id },
+      update: data,
+      create: {
+        id: ticket.id,
+        ...data,
+        activities: {
+          create: {
+            actor: { connect: { id: ticket.createdById } },
+            type: 'seeded',
+            message: 'Seeded from AP workflow migration sample',
+            toStatus: ticket.status,
+          },
+        },
+      },
+    });
+  }
+
+  await prisma.supportingDocument.upsert({
+    where: { id: 'sd-00000000-0000-0000-0000-000000000001' },
+    update: {
+      invoiceId: '20000000-0000-0000-0000-000000000001',
+      documentType: 'INVOICE',
+      fileName: 'FIN-2026-104.pdf',
+      filePath: 'uploads/FIN-2026-104.pdf',
+      mimeType: 'application/pdf',
+      fileSize: BigInt(184000),
+      uploadedByUserId: apClerk.id,
+    },
+    create: {
+      id: 'sd-00000000-0000-0000-0000-000000000001',
+      invoiceId: '20000000-0000-0000-0000-000000000001',
+      documentType: 'INVOICE',
+      fileName: 'FIN-2026-104.pdf',
+      filePath: 'uploads/FIN-2026-104.pdf',
+      mimeType: 'application/pdf',
+      fileSize: BigInt(184000),
+      uploadedByUserId: apClerk.id,
+    },
+  });
+
+  await prisma.verification.upsert({
+    where: { id: 'vf-00000000-0000-0000-0000-000000000001' },
+    update: {
+      invoiceId: '20000000-0000-0000-0000-000000000001',
+      verifiedByUserId: financeAdmin.id,
+      verificationType: 'ACCURACY',
+      status: 'PASSED',
+      comments: 'Invoice amount, PO reference, and vendor master account matched.',
+      verifiedAt: new Date('2026-05-19T10:30:00.000Z'),
+    },
+    create: {
+      id: 'vf-00000000-0000-0000-0000-000000000001',
+      invoiceId: '20000000-0000-0000-0000-000000000001',
+      verifiedByUserId: financeAdmin.id,
+      verificationType: 'ACCURACY',
+      status: 'PASSED',
+      comments: 'Invoice amount, PO reference, and vendor master account matched.',
+      verifiedAt: new Date('2026-05-19T10:30:00.000Z'),
+    },
+  });
+
+  await prisma.interdepartmentalQuery.upsert({
+    where: { id: 'iq-00000000-0000-0000-0000-000000000001' },
+    update: {
+      invoiceId: '20000000-0000-0000-0000-000000000003',
+      raisedByUserId: apClerk.id,
+      assignedToDepartmentId: admin.id,
+      queryText: 'Please attach purchase order and vendor account proof.',
+      status: 'OPEN',
+    },
+    create: {
+      id: 'iq-00000000-0000-0000-0000-000000000001',
+      invoiceId: '20000000-0000-0000-0000-000000000003',
+      raisedByUserId: apClerk.id,
+      assignedToDepartmentId: admin.id,
+      queryText: 'Please attach purchase order and vendor account proof.',
+      status: 'OPEN',
+    },
+  });
+
+  const batch = await prisma.paymentBatch.upsert({
+    where: { batchNumber: 'PB-DEMO-001' },
+    update: {
+      batchDate: new Date('2026-05-19T00:00:00.000Z'),
+      totalCount: 1,
+      totalAmount: new Prisma.Decimal('176675'),
+      status: PaymentBatchStatus.EXPORTED,
+      exportedByUserId: apClerk.id,
+      exportedAt: new Date('2026-05-19T12:10:00.000Z'),
+    },
+    create: {
+      batchNumber: 'PB-DEMO-001',
+      batchDate: new Date('2026-05-19T00:00:00.000Z'),
+      totalCount: 1,
+      totalAmount: new Prisma.Decimal('176675'),
+      status: PaymentBatchStatus.EXPORTED,
+      exportedByUserId: apClerk.id,
+      exportedAt: new Date('2026-05-19T12:10:00.000Z'),
+    },
+  });
+
+  const payment = await prisma.paymentRecord.upsert({
+    where: { paymentRef: 'PAY-DEMO-001' },
+    update: {
+      invoiceId: '20000000-0000-0000-0000-000000000001',
+      vendorId: cloudHost.id,
+      batchId: batch.id,
+      paymentDate: new Date('2026-05-20T00:00:00.000Z'),
+      paymentMethod: PaymentMethod.BANK_PORTAL,
+      amount: new Prisma.Decimal('176675'),
+      withholdingTaxDeducted: new Prisma.Decimal('8325'),
+      status: PaymentRecordStatus.PROCESSING,
+      initiatedByUserId: apClerk.id,
+      authorizedByUserId: companyAdmin.id,
+      meezanTransactionRef: 'MZN-UP-8821',
+    },
+    create: {
+      paymentRef: 'PAY-DEMO-001',
+      invoiceId: '20000000-0000-0000-0000-000000000001',
+      vendorId: cloudHost.id,
+      batchId: batch.id,
+      paymentDate: new Date('2026-05-20T00:00:00.000Z'),
+      paymentMethod: PaymentMethod.BANK_PORTAL,
+      amount: new Prisma.Decimal('176675'),
+      withholdingTaxDeducted: new Prisma.Decimal('8325'),
+      status: PaymentRecordStatus.PROCESSING,
+      initiatedByUserId: apClerk.id,
+      authorizedByUserId: companyAdmin.id,
+      meezanTransactionRef: 'MZN-UP-8821',
+    },
+  });
+
+  await prisma.reconciliation.upsert({
+    where: { id: 'rc-00000000-0000-0000-0000-000000000001' },
+    update: {
+      paymentId: payment.id,
+      bankStatementRef: 'STMT-2026-05-20-001',
+      statementDate: new Date('2026-05-20T00:00:00.000Z'),
+      reconciledAmount: new Prisma.Decimal('176675'),
+      status: ReconciliationStatus.MATCHED,
+      reconciledByUserId: financeAdmin.id,
+    },
+    create: {
+      id: 'rc-00000000-0000-0000-0000-000000000001',
+      paymentId: payment.id,
+      bankStatementRef: 'STMT-2026-05-20-001',
+      statementDate: new Date('2026-05-20T00:00:00.000Z'),
+      reconciledAmount: new Prisma.Decimal('176675'),
+      status: ReconciliationStatus.MATCHED,
+      reconciledByUserId: financeAdmin.id,
+    },
+  });
+
+  await prisma.notification.upsert({
+    where: { id: 'nt-00000000-0000-0000-0000-000000000001' },
+    update: {
+      userId: companyAdmin.id,
+      type: 'APPROVAL_PENDING',
+      title: 'CFO sign pending',
+      message: 'FIN-2026-104 is uploaded to Meezan and waiting for authorization.',
+      link: '/tickets/30000000-0000-0000-0000-000000000001',
+      read: false,
+    },
+    create: {
+      id: 'nt-00000000-0000-0000-0000-000000000001',
+      userId: companyAdmin.id,
+      type: 'APPROVAL_PENDING',
+      title: 'CFO sign pending',
+      message: 'FIN-2026-104 is uploaded to Meezan and waiting for authorization.',
+      link: '/tickets/30000000-0000-0000-0000-000000000001',
+      read: false,
+    },
+  });
+
+  console.log('Seed complete. Demo password for all users: changeme123');
+}
+
+main()
+  .then(() => prisma.$disconnect())
+  .catch(async (e) => {
+    console.error(e);
+    await prisma.$disconnect();
+    process.exit(1);
+  });

@@ -124,4 +124,9 @@ export class TicketsController {
   submitToFinance(@Param('id') id: string, @Req() req: { user: RequestUser }) {
     return this.tickets.submitToFinance(id, req.user);
   }
+
+  @Post(':id/test-bank-auto-close')
+  runTestBankAutomation(@Param('id') id: string, @Req() req: { user: RequestUser }) {
+    return this.tickets.runTestBankAutomation(id, req.user);
+  }
 }

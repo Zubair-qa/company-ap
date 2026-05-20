@@ -200,6 +200,7 @@ const roleTransitions = {
     XERO_BILL_ENTRY: ['PAYMENT_PREPARATION'],
     PAYMENT_PREPARATION: ['BANK_UPLOAD'],
     BANK_UPLOAD: ['CFO_SIGN_PENDING'],
+    BANK_EXECUTION_PENDING: ['BANK_EXECUTED'],
     BANK_EXECUTED: ['MARKED_PAID_IN_XERO'],
     MARKED_PAID_IN_XERO: ['REQUESTER_NOTIFIED'],
     REQUESTER_NOTIFIED: ['PAYMENT_COMPLETE'],
@@ -1062,6 +1063,79 @@ function applyTicketStatusSideEffects(ticket) {
   return ticket;
 }
 
+function runTestBankAutomation(ticket, user) {
+  const now = new Date().toISOString();
+  const stamp = Date.now();
+  const bankPortalReference = ticket.bankPortalReference || `TESTBANK-${stamp}`;
+  const xeroBillId = ticket.xeroBillId || `test-xero-bill-${stamp}`;
+  const xeroBillNumber = ticket.xeroBillNumber || `TEST-XBILL-${stamp}`;
+  const xeroPaymentId = ticket.xeroPaymentId || `test-xero-payment-${stamp}`;
+  const activities = [
+    {
+      id: `act-${stamp}-bank`,
+      type: 'test_bank_execution',
+      message: `Test Bank Simulator executed payment ${bankPortalReference}`,
+      fromStatus: 'BANK_EXECUTION_PENDING',
+      toStatus: 'BANK_EXECUTED',
+      createdAt: now,
+      actor: { id: user.id, name: user.name, email: user.email },
+    },
+    {
+      id: `act-${stamp}-xero`,
+      type: 'test_xero_paid',
+      message: `Test Xero payment recorded ${xeroPaymentId}`,
+      fromStatus: 'BANK_EXECUTED',
+      toStatus: 'MARKED_PAID_IN_XERO',
+      createdAt: now,
+      actor: { id: user.id, name: user.name, email: user.email },
+    },
+    {
+      id: `act-${stamp}-notify`,
+      type: 'requester_notified',
+      message: 'Requester notification completed by test bank automation',
+      fromStatus: 'MARKED_PAID_IN_XERO',
+      toStatus: 'REQUESTER_NOTIFIED',
+      createdAt: now,
+      actor: { id: user.id, name: user.name, email: user.email },
+    },
+    {
+      id: `act-${stamp}-close`,
+      type: 'payment_complete',
+      message: 'Payment closed automatically after test bank confirmation',
+      fromStatus: 'REQUESTER_NOTIFIED',
+      toStatus: 'PAYMENT_COMPLETE',
+      createdAt: now,
+      actor: { id: user.id, name: user.name, email: user.email },
+    },
+  ];
+
+  const invoiceIndex = ticket.invoiceId
+    ? invoices.findIndex((invoice) => invoice.id === ticket.invoiceId)
+    : -1;
+  if (invoiceIndex >= 0) {
+    invoices[invoiceIndex] = {
+      ...invoices[invoiceIndex],
+      status: 'PAID',
+      amountPaid: ticket.netPayablePkr || ticket.amountPkr,
+      balanceDue: '0',
+    };
+  }
+
+  return {
+    ...ticket,
+    status: 'PAYMENT_COMPLETE',
+    bankPaymentStatus: 'EXECUTED',
+    bankPortalReference,
+    bankExecutedAt: now,
+    xeroSyncStatus: 'PAID_MARKED',
+    xeroBillId,
+    xeroBillNumber,
+    xeroPaymentId,
+    requesterNotifiedAt: now,
+    activities: [...activities, ...(ticket.activities || [])],
+  };
+}
+
 function createTicketFromInvoice({ invoiceId, departmentId, title, amountPkr, originalFilename }) {
   const ticket = {
     ...tickets[0],
@@ -1406,6 +1480,33 @@ http
         xeroPaymentId: tickets[index].xeroPaymentId || `xero-payment-${Date.now()}`,
       };
       return send(res, 200, { synced: true, ticket: hydrate(tickets[index]) });
+    }
+    const testBankMatch = url.pathname.match(/^\/api\/tickets\/([^/]+)\/test-bank-auto-close$/);
+    if (testBankMatch && req.method === 'POST') {
+      if (!canUsePaymentOps(requestUser)) {
+        return send(res, 403, { message: 'AP or company admin access is required for test bank automation' });
+      }
+      const index = tickets.findIndex((ticket) => ticket.id === testBankMatch[1]);
+      if (index < 0 || !visibleTickets(requestUser).some((ticket) => ticket.id === testBankMatch[1])) {
+        return send(res, 404, { message: 'Ticket not found' });
+      }
+      if (tickets[index].status === 'PAYMENT_COMPLETE') {
+        return send(res, 403, { message: 'Payment complete tickets are locked for audit' });
+      }
+      if (tickets[index].status !== 'BANK_EXECUTION_PENDING') {
+        return send(res, 400, { message: 'Test bank can run only after CFO sign is recorded' });
+      }
+      tickets[index] = runTestBankAutomation(tickets[index], requestUser);
+      return send(res, 200, {
+        provider: 'Test Bank Simulator',
+        automation: [
+          'BANK_EXECUTION_PENDING -> BANK_EXECUTED',
+          'BANK_EXECUTED -> MARKED_PAID_IN_XERO',
+          'MARKED_PAID_IN_XERO -> REQUESTER_NOTIFIED',
+          'REQUESTER_NOTIFIED -> PAYMENT_COMPLETE',
+        ],
+        ticket: hydrate(tickets[index]),
+      });
     }
     if (req.method === 'GET' && url.pathname === '/api/tickets/board') {
       const visible = visibleTickets(requestUser);

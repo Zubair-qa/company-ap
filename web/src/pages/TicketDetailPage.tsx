@@ -454,6 +454,7 @@ export function TicketDetailPage() {
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [comment, setComment] = useState('');
+  const [approvalDecision, setApprovalDecision] = useState<'approved' | 'rejected' | null>(null);
   const scopeKey = user?.id ?? 'anonymous';
 
   const { data: ticket, isLoading, error } = useQuery({
@@ -485,6 +486,10 @@ export function TicketDetailPage() {
   useEffect(() => {
     if (ticket) setDraft(makeDraft(ticket));
   }, [ticket]);
+
+  useEffect(() => {
+    setApprovalDecision(null);
+  }, [id]);
 
   const update = useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
@@ -540,6 +545,29 @@ export function TicketDetailPage() {
     },
   });
 
+  const runTestBankAutomation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<{ ticket: TicketDetail }>(
+        `/api/tickets/${id}/test-bank-auto-close`,
+        {},
+      );
+      return data.ticket;
+    },
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.setQueryData(['ticket', id, scopeKey], updated);
+      setDraft(makeDraft(updated));
+      setNotice({
+        type: 'success',
+        message: 'Test bank executed, Xero paid, requester notified, and ticket closed.',
+      });
+    },
+    onError: (mutationError) => {
+      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
+    },
+  });
+
   const uploadAttachment = useMutation({
     mutationFn: async (file: File) => {
       const fd = new FormData();
@@ -584,6 +612,7 @@ export function TicketDetailPage() {
       return data;
     },
     onSuccess: (_data, approved) => {
+      setApprovalDecision(approved ? 'approved' : 'rejected');
       qc.invalidateQueries({ queryKey: ['tickets'] });
       qc.invalidateQueries({ queryKey: ['ticket', id, scopeKey] });
       setNotice({
@@ -609,7 +638,7 @@ export function TicketDetailPage() {
   }, [ticket]);
 
   if (!id) return <p className="error">Missing ticket id.</p>;
-  if (error) return <p className="error">Ticket could not be loaded.</p>;
+  if (error && !approvalDecision) return <p className="error">Ticket could not be loaded.</p>;
   if (isLoading || !ticket || !draft) return <p className="muted">Loading ticket...</p>;
 
   function field(name: keyof Draft, value: string | boolean) {
@@ -669,7 +698,8 @@ export function TicketDetailPage() {
   const canHeadApprove = Boolean(
     user?.role === 'DEPT_ADMIN' &&
       ticket.status === 'DEPARTMENT_HEAD_APPROVAL' &&
-      ticket.invoice?.id,
+      ticket.invoice?.id &&
+      approvalDecision === null,
   );
 
   function fullPayload() {
@@ -746,6 +776,11 @@ export function TicketDetailPage() {
   function markPaid() {
     setNotice(null);
     markPaidInXero.mutate();
+  }
+
+  function runTestBank() {
+    setNotice(null);
+    runTestBankAutomation.mutate();
   }
 
   function attachFile(event: FormEvent) {
@@ -833,6 +868,22 @@ export function TicketDetailPage() {
           Payment complete tickets are locked for audit. Create a linked ticket for any remaining
           or follow-up payment.
         </div>
+      ) : null}
+
+      {approvalDecision ? (
+        <section className="ticket-panel ticket-cfo-panel">
+          <div>
+            <h3>Department head status</h3>
+            <p className="muted">
+              {approvalDecision === 'approved'
+                ? 'Approved. Request has been released to finance for AP processing.'
+                : 'Rejected. Request has been returned to department with the rejection reason.'}
+            </p>
+          </div>
+          <span className={`badge ${approvalDecision === 'approved' ? 'badge-emerald' : 'badge-rose'}`}>
+            {approvalDecision === 'approved' ? 'Approved' : 'Rejected'}
+          </span>
+        </section>
       ) : null}
 
       {canHeadApprove ? (
@@ -925,16 +976,26 @@ export function TicketDetailPage() {
             </p>
           </div>
           {ticket.status === 'BANK_EXECUTION_PENDING' ? (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() =>
-                moveTicketStatus('BANK_EXECUTED', { bankPaymentStatus: 'EXECUTED' })
-              }
-              disabled={!canEdit('status') || update.isPending}
-            >
-              Record bank execution
-            </button>
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={runTestBank}
+                disabled={runTestBankAutomation.isPending}
+              >
+                Run test bank auto close
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() =>
+                  moveTicketStatus('BANK_EXECUTED', { bankPaymentStatus: 'EXECUTED' })
+                }
+                disabled={!canEdit('status') || update.isPending}
+              >
+                Record bank execution
+              </button>
+            </div>
           ) : null}
           {ticket.status === 'BANK_EXECUTED' ? (
             <button

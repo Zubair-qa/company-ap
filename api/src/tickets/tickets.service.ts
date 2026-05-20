@@ -9,6 +9,7 @@ import {
   DocumentType,
   DocumentStatus,
   FilerStatus,
+  InvoiceStatus,
   Prisma,
   Role,
   TicketStatus,
@@ -173,6 +174,7 @@ const ROLE_STATUS_PERMISSIONS: Record<Role, Partial<Record<TicketStatus, TicketS
     [TicketStatus.XERO_BILL_ENTRY]: [TicketStatus.PAYMENT_PREPARATION],
     [TicketStatus.PAYMENT_PREPARATION]: [TicketStatus.BANK_UPLOAD],
     [TicketStatus.BANK_UPLOAD]: [TicketStatus.CFO_SIGN_PENDING],
+    [TicketStatus.BANK_EXECUTION_PENDING]: [TicketStatus.BANK_EXECUTED],
     [TicketStatus.BANK_EXECUTED]: [TicketStatus.MARKED_PAID_IN_XERO],
     [TicketStatus.MARKED_PAID_IN_XERO]: [TicketStatus.REQUESTER_NOTIFIED],
     [TicketStatus.REQUESTER_NOTIFIED]: [TicketStatus.PAYMENT_COMPLETE],
@@ -740,6 +742,101 @@ export class TicketsService {
       include: ticketInclude,
     });
     return this.decorateTicket(updated, user);
+  }
+
+  async runTestBankAutomation(id: string, user: RequestUser) {
+    if (user.role !== Role.COMPANY_ADMIN && user.role !== Role.AP_CLERK) {
+      throw new ForbiddenException('AP or company admin access is required for test bank automation');
+    }
+
+    const existing = await this.prisma.paymentTicket.findFirst({
+      where: { id, ...this.accessWhere(user) },
+    });
+    if (!existing) throw new NotFoundException();
+    if (existing.status === TicketStatus.PAYMENT_COMPLETE) {
+      throw new ForbiddenException('Payment complete tickets are locked for audit');
+    }
+    if (existing.status !== TicketStatus.BANK_EXECUTION_PENDING) {
+      throw new BadRequestException('Test bank can run only after CFO sign is recorded');
+    }
+
+    const now = new Date();
+    const stamp = Date.now();
+    const bankPortalReference = existing.bankPortalReference ?? `TESTBANK-${stamp}`;
+    const xeroBillId = existing.xeroBillId ?? `test-xero-bill-${stamp}`;
+    const xeroBillNumber = existing.xeroBillNumber ?? `TEST-XBILL-${stamp}`;
+    const xeroPaymentId = existing.xeroPaymentId ?? `test-xero-payment-${stamp}`;
+    const paidAmount = existing.netPayablePkr ?? existing.amountPkr;
+
+    const updated = await this.prisma.paymentTicket.update({
+      where: { id },
+      data: {
+        status: TicketStatus.PAYMENT_COMPLETE,
+        bankPaymentStatus: BankPaymentStatus.EXECUTED,
+        bankPortalReference,
+        bankExecutedAt: now,
+        xeroSyncStatus: XeroSyncStatus.PAID_MARKED,
+        xeroBillId,
+        xeroBillNumber,
+        xeroPaymentId,
+        xeroLastSyncedAt: now,
+        xeroError: null,
+        requesterNotifiedAt: now,
+        invoice: existing.invoiceId
+          ? {
+              update: {
+                status: InvoiceStatus.PAID,
+                amountPaid: paidAmount,
+                balanceDue: new Prisma.Decimal(0),
+              },
+            }
+          : undefined,
+        activities: {
+          create: [
+            {
+              actor: { connect: { id: user.id } },
+              type: 'test_bank_execution',
+              message: `Test Bank Simulator executed payment ${bankPortalReference}`,
+              fromStatus: TicketStatus.BANK_EXECUTION_PENDING,
+              toStatus: TicketStatus.BANK_EXECUTED,
+            },
+            {
+              actor: { connect: { id: user.id } },
+              type: 'test_xero_paid',
+              message: `Test Xero payment recorded ${xeroPaymentId}`,
+              fromStatus: TicketStatus.BANK_EXECUTED,
+              toStatus: TicketStatus.MARKED_PAID_IN_XERO,
+            },
+            {
+              actor: { connect: { id: user.id } },
+              type: 'requester_notified',
+              message: 'Requester notification completed by test bank automation',
+              fromStatus: TicketStatus.MARKED_PAID_IN_XERO,
+              toStatus: TicketStatus.REQUESTER_NOTIFIED,
+            },
+            {
+              actor: { connect: { id: user.id } },
+              type: 'payment_complete',
+              message: 'Payment closed automatically after test bank confirmation',
+              fromStatus: TicketStatus.REQUESTER_NOTIFIED,
+              toStatus: TicketStatus.PAYMENT_COMPLETE,
+            },
+          ],
+        },
+      },
+      include: ticketInclude,
+    });
+
+    return {
+      provider: 'Test Bank Simulator',
+      automation: [
+        'BANK_EXECUTION_PENDING -> BANK_EXECUTED',
+        'BANK_EXECUTED -> MARKED_PAID_IN_XERO',
+        'MARKED_PAID_IN_XERO -> REQUESTER_NOTIFIED',
+        'REQUESTER_NOTIFIED -> PAYMENT_COMPLETE',
+      ],
+      ticket: this.decorateTicket(updated, user),
+    };
   }
 
   async submitToFinance(id: string, user: RequestUser) {

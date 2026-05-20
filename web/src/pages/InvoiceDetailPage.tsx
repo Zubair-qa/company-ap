@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -66,6 +66,7 @@ export function InvoiceDetailPage() {
   const qc = useQueryClient();
   const [note, setNote] = useState('');
   const [notice, setNotice] = useState<Notice>(null);
+  const [approvalDecision, setApprovalDecision] = useState<'approved' | 'rejected' | null>(null);
 
   const { data: inv, isError, isLoading } = useQuery({
     queryKey: ['invoice', id],
@@ -91,6 +92,10 @@ export function InvoiceDetailPage() {
       return data;
     },
   });
+
+  useEffect(() => {
+    setApprovalDecision(null);
+  }, [id]);
 
   const patch = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
@@ -138,6 +143,7 @@ export function InvoiceDetailPage() {
       return data;
     },
     onSuccess: (_, approved) => {
+      setApprovalDecision(approved ? 'approved' : 'rejected');
       setNotice({
         type: 'success',
         text: approved
@@ -173,7 +179,8 @@ export function InvoiceDetailPage() {
     (isDepartmentOwner && !!inv?.status && departmentEditableStatuses.has(inv.status));
   const canApprove =
     (user?.role === 'DEPT_ADMIN' || user?.role === 'COMPANY_ADMIN') &&
-    inv?.status === 'AWAITING_APPROVAL';
+    inv?.status === 'AWAITING_APPROVAL' &&
+    approvalDecision === null;
   const canSubmitApproval =
     ((user?.role === 'DEPT_USER' && isDepartmentOwner) || user?.role === 'COMPANY_ADMIN') &&
     inv?.status === 'VENDOR_VERIFIED' &&
@@ -204,7 +211,7 @@ export function InvoiceDetailPage() {
 
   if (!id) return <p className="error">Missing id</p>;
   if (isLoading) return <p className="muted">Loading...</p>;
-  if (isError || !inv) {
+  if ((isError && !approvalDecision) || !inv) {
     return (
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Invoice could not be loaded</h2>
@@ -227,6 +234,20 @@ export function InvoiceDetailPage() {
       {notice ? (
         <div className={`notice notice-${notice.type}`} style={{ marginBottom: '1rem' }}>
           {notice.text}
+        </div>
+      ) : null}
+
+      {approvalDecision ? (
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <h3 style={{ marginTop: 0 }}>Department head status</h3>
+          <p className="muted">
+            {approvalDecision === 'approved'
+              ? 'Approved. Request has been released to finance AP board.'
+              : 'Rejected. Request has been returned to department.'}
+          </p>
+          <span className={`badge ${approvalDecision === 'approved' ? 'badge-emerald' : 'badge-rose'}`}>
+            {approvalDecision === 'approved' ? 'Approved' : 'Rejected'}
+          </span>
         </div>
       ) : null}
 

@@ -1,17 +1,22 @@
 import type { FormEvent } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { useAuth } from '../auth/AuthProvider';
 
 type Dept = { id: string; name: string };
 
 export function UploadPage() {
+  const { user } = useAuth();
   const nav = useNavigate();
   const [file, setFile] = useState<File | null>(null);
-  const [departmentId, setDepartmentId] = useState('');
+  const [departmentId, setDepartmentId] = useState(user?.departmentId ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  const canCreateInvoice = ['AP_CLERK', 'DEPT_USER', 'COMPANY_ADMIN'].includes(user?.role ?? '');
+  const isDepartmentUser = user?.role === 'DEPT_USER';
 
   const { data: departments } = useQuery({
     queryKey: ['departments'],
@@ -20,6 +25,12 @@ export function UploadPage() {
       return data;
     },
   });
+
+  useEffect(() => {
+    if (isDepartmentUser && user?.departmentId) {
+      setDepartmentId(user.departmentId);
+    }
+  }, [isDepartmentUser, user?.departmentId]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -33,18 +44,35 @@ export function UploadPage() {
       const { data } = await api.post<{ id: string }>('/api/invoice-files/upload', fd);
       nav(`/invoices/${data.id}`);
     } catch {
-      setError('Upload failed. Check file size (max 15 MB) and department.');
+      setError('Invoice could not be created. Check file size, department, and access scope.');
     } finally {
       setBusy(false);
     }
   }
 
+  if (!user) return null;
+
+  if (!canCreateInvoice) {
+    return (
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Invoice creation is department-owned</h2>
+        <p className="muted">
+          AP clerks, department users, and company admins create invoices. Department heads review
+          and approve from their board before finance receives the request.
+        </p>
+        <Link to="/" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+          Back to AP board
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>Upload invoice</h2>
+      <h2 style={{ marginTop: 0 }}>Create invoice</h2>
       <p className="muted">
-        Supports Excel (<code>.xlsx</code>), CSV (including Google Sheets → Download as CSV), and
-        images (manual entry after upload).
+        AP clerks and department users submit invoices here. The request first goes through synced PO creation,
+        agent checks, and department head approval before AP receives it.
       </p>
       <div className="card">
         <form onSubmit={onSubmit}>
@@ -54,9 +82,10 @@ export function UploadPage() {
               id="dept"
               required
               value={departmentId}
+              disabled={isDepartmentUser}
               onChange={(e) => setDepartmentId(e.target.value)}
             >
-              <option value="">Select…</option>
+              <option value="">Select...</option>
               {(departments ?? []).map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
@@ -69,29 +98,28 @@ export function UploadPage() {
             <input
               id="file"
               type="file"
-              accept=".xlsx,.xls,.csv,image/*"
+              accept=".pdf,.xlsx,.xls,.csv,image/*"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               required
             />
           </div>
           {error ? <p className="error">{error}</p> : null}
           <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? 'Uploading…' : 'Upload'}
+            {busy ? 'Creating...' : 'Create invoice'}
           </button>
         </form>
       </div>
 
       <h3>Google Sheets</h3>
       <p className="muted">
-        In Google Sheets use <strong>File → Share → Publish to web</strong> (or export CSV) and
-        paste the published CSV URL below.
+        Publish or export the sheet as CSV, then paste the published CSV URL below.
       </p>
-      <GoogleCsvImport />
+      <GoogleCsvImport departmentId={departmentId} />
     </div>
   );
 }
 
-function GoogleCsvImport() {
+function GoogleCsvImport({ departmentId }: { departmentId: string }) {
   const nav = useNavigate();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
@@ -99,11 +127,13 @@ function GoogleCsvImport() {
 
   async function go(e: FormEvent) {
     e.preventDefault();
+    if (!departmentId) return;
     setBusy(true);
     setError('');
     try {
       const { data } = await api.post<{ id: string }>('/api/invoices/import/google-csv', {
         url,
+        departmentId,
       });
       nav(`/invoices/${data.id}`);
     } catch {
@@ -128,8 +158,8 @@ function GoogleCsvImport() {
           />
         </div>
         {error ? <p className="error">{error}</p> : null}
-        <button type="submit" className="btn btn-secondary" disabled={busy}>
-          {busy ? 'Importing…' : 'Import from URL'}
+        <button type="submit" className="btn btn-secondary" disabled={busy || !departmentId}>
+          {busy ? 'Importing...' : 'Import from URL'}
         </button>
       </form>
     </div>

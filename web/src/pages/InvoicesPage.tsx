@@ -34,9 +34,9 @@ export function InvoicesPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ marginTop: 0 }}>Invoices</h2>
-        {(user.role === 'AP_CLERK' || user.role === 'COMPANY_ADMIN') && (
+        {['AP_CLERK', 'DEPT_USER', 'COMPANY_ADMIN'].includes(user.role) && (
           <Link to="/upload" className="btn btn-primary" style={{ textDecoration: 'none' }}>
-            Upload invoice
+            Create invoice
           </Link>
         )}
       </div>

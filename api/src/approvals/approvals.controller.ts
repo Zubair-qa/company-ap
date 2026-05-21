@@ -15,7 +15,8 @@ export class ApprovalsController {
   decide(
     @Param('invoiceId') invoiceId: string,
     @Body() dto: ApprovalDecisionDto,
-    @Req() req: {
+    @Req()
+    req: {
       user: { id: string; role: Role; departmentId: string | null };
     },
   ) {

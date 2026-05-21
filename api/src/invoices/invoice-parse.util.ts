@@ -19,7 +19,9 @@ function rowToObject(row: unknown[]): Record<string, string | number | null> {
   for (let i = 0; i < row.length; i++) {
     const v = row[i];
     if (v === undefined || v === null || v === '') continue;
-    out[`col_${i}`] = typeof v === 'number' ? v : String(v);
+    if (typeof v === 'number') out[`col_${i}`] = v;
+    else if (typeof v === 'string') out[`col_${i}`] = v;
+    else out[`col_${i}`] = JSON.stringify(v);
   }
   return out;
 }
@@ -31,7 +33,7 @@ export function parseSpreadsheetBuffer(buf: Buffer): ExtractedInvoice {
   const rows = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, {
     header: 1,
     defval: null,
-  }) as (string | number | null)[][];
+  });
 
   const preview = rows.slice(0, 5).map((r) => rowToObject(r));
 
@@ -51,12 +53,18 @@ export function parseSpreadsheetBuffer(buf: Buffer): ExtractedInvoice {
       map[k] = dataRow[i] ?? null;
     });
     const vendorName =
-      firstString(map, ['vendor', 'vendor_name', 'supplier', 'supplier_name']) ??
-      undefined;
+      firstString(map, [
+        'vendor',
+        'vendor_name',
+        'supplier',
+        'supplier_name',
+      ]) ?? undefined;
     const vendorTaxNumber =
-      firstString(map, ['tax', 'tax_number', 'ntn', 'ntn_strn', 'strn']) ?? undefined;
+      firstString(map, ['tax', 'tax_number', 'ntn', 'ntn_strn', 'strn']) ??
+      undefined;
     const reference =
-      firstString(map, ['invoice', 'invoice_no', 'reference', 'bill_no']) ?? undefined;
+      firstString(map, ['invoice', 'invoice_no', 'reference', 'bill_no']) ??
+      undefined;
     const amountPkr = firstAmount(map, [
       'amount',
       'total',

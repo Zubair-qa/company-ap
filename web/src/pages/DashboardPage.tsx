@@ -155,13 +155,15 @@ export function DashboardPage() {
     const statuses =
       user?.role === 'DEPT_ADMIN'
         ? ['AWAITING_APPROVAL']
+        : user?.role === 'DEPT_USER'
+          ? ['REJECTED', 'EXTRACTED', 'VENDOR_UNVERIFIED', 'VENDOR_VERIFIED']
         : ['VENDOR_UNVERIFIED', 'EXTRACTED', 'VENDOR_VERIFIED', 'APPROVED'];
     return invoices.filter((inv) => statuses.includes(inv.status)).slice(0, 6);
   }, [invoices, user?.role]);
 
   if (!user) return null;
 
-  const canUpload = user.role === 'AP_CLERK' || user.role === 'COMPANY_ADMIN';
+  const canUpload = ['AP_CLERK', 'DEPT_USER', 'COMPANY_ADMIN'].includes(user.role);
   const roleName = user.role.replaceAll('_', ' ');
   const largestDepartment = Math.max(
     1,
@@ -184,7 +186,7 @@ export function DashboardPage() {
           <span className="scope-pill">{invoices.length} invoices</span>
           {canUpload ? (
             <Link to="/upload" className="btn btn-primary">
-              Upload invoice
+              Create invoice
             </Link>
           ) : null}
         </div>
@@ -285,7 +287,13 @@ export function DashboardPage() {
           <div className="section-heading">
             <div>
               <p className="eyebrow">Queue</p>
-              <h3>{user.role === 'DEPT_ADMIN' ? 'Approvals' : 'AP actions'}</h3>
+              <h3>
+                {user.role === 'DEPT_ADMIN'
+                  ? 'Head approvals'
+                  : user.role === 'DEPT_USER'
+                    ? 'Department actions'
+                    : 'AP actions'}
+              </h3>
             </div>
           </div>
           {actionInvoices.length ? (

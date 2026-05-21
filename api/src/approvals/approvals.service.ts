@@ -4,19 +4,25 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceStatus, Role, decodeJson } from '../common/domain';
+import { InvoiceStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { InvoicesService } from '../invoices/invoices.service';
 
 @Injectable()
 export class ApprovalsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private invoices: InvoicesService,
+  ) {}
 
   async decide(
     invoiceId: string,
     dto: { approved: boolean; note?: string },
     user: { id: string; role: Role; departmentId: string | null },
   ) {
-    const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    const inv = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+    });
     if (!inv) throw new NotFoundException();
     if (inv.status !== InvoiceStatus.AWAITING_APPROVAL) {
       throw new BadRequestException('Invoice is not awaiting approval');
@@ -24,7 +30,9 @@ export class ApprovalsService {
 
     if (user.role === Role.DEPT_ADMIN) {
       if (!user.departmentId || inv.departmentId !== user.departmentId) {
-        throw new ForbiddenException('You can only approve invoices for your department');
+        throw new ForbiddenException(
+          'You can only approve invoices for your department',
+        );
       }
     }
 
@@ -41,7 +49,7 @@ export class ApprovalsService {
       ? InvoiceStatus.APPROVED
       : InvoiceStatus.REJECTED;
 
-    const updated = await this.prisma.invoice.update({
+    await this.prisma.invoice.update({
       where: { id: invoiceId },
       data: { status: nextStatus },
       include: {
@@ -50,10 +58,21 @@ export class ApprovalsService {
         approvals: {
           orderBy: { createdAt: 'desc' },
           take: 5,
-          include: { approver: { select: { id: true, name: true, email: true } } },
+          include: {
+            approver: { select: { id: true, name: true, email: true } },
+          },
         },
       },
     });
-    return { ...updated, extracted: decodeJson(updated.extracted) };
+
+    if (dto.approved) {
+      return this.invoices.releaseApprovedInvoiceToFinance(invoiceId, user.id);
+    }
+
+    return this.invoices.returnRejectedInvoiceToDepartment(
+      invoiceId,
+      user.id,
+      dto.note,
+    );
   }
 }

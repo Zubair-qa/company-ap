@@ -28,7 +28,7 @@ export class InvoiceFilesController {
   constructor(private invoices: InvoicesService) {}
 
   @Post('upload')
-  @Roles(Role.COMPANY_ADMIN, Role.AP_CLERK)
+  @Roles(Role.COMPANY_ADMIN, Role.AP_CLERK, Role.DEPT_USER)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
@@ -43,11 +43,16 @@ export class InvoiceFilesController {
   )
   async upload(
     @UploadedFile() file: Express.Multer.File,
-    @Req() req: { user: { id: string }; body: { departmentId?: string } },
+    @Req()
+    req: {
+      user: { id: string; role: Role; departmentId: string | null };
+      body: { departmentId?: string };
+    },
   ) {
     if (!file) throw new BadRequestException('file is required');
     const departmentId = req.body?.departmentId;
-    if (!departmentId) throw new BadRequestException('departmentId is required');
-    return this.invoices.createFromUpload(file, departmentId, req.user.id);
+    if (!departmentId)
+      throw new BadRequestException('departmentId is required');
+    return this.invoices.createFromUpload(file, departmentId, req.user);
   }
 }

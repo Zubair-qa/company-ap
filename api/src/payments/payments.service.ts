@@ -31,7 +31,9 @@ export class PaymentsService {
   }
 
   async createCheckoutSession(invoiceId: string) {
-    const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    const inv = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+    });
     if (!inv) throw new NotFoundException();
     if (inv.status !== InvoiceStatus.APPROVED) {
       throw new BadRequestException('Invoice must be approved before payment');
@@ -50,7 +52,8 @@ export class PaymentsService {
     }
 
     const unitAmount = Math.round(rupees);
-    const frontend = this.config.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+    const frontend =
+      this.config.get<string>('FRONTEND_URL') || 'http://localhost:5173';
 
     const session = await this.stripe.checkout.sessions.create({
       mode: 'payment',
@@ -84,7 +87,10 @@ export class PaymentsService {
     return { url: session.url, sessionId: session.id };
   }
 
-  async handleStripeWebhook(req: RawBodyRequest<Request>, signature: string | undefined) {
+  async handleStripeWebhook(
+    req: RawBodyRequest<Request>,
+    signature: string | undefined,
+  ) {
     const secret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
     if (!secret) {
       throw new BadRequestException('STRIPE_WEBHOOK_SECRET is not set');
@@ -95,7 +101,9 @@ export class PaymentsService {
 
     const raw = req.rawBody;
     if (!raw) {
-      throw new BadRequestException('Missing raw body for webhook verification');
+      throw new BadRequestException(
+        'Missing raw body for webhook verification',
+      );
     }
 
     let event;
@@ -103,7 +111,9 @@ export class PaymentsService {
       event = this.stripe.webhooks.constructEvent(raw, signature, secret);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Invalid payload';
-      throw new BadRequestException(`Webhook signature verification failed: ${message}`);
+      throw new BadRequestException(
+        `Webhook signature verification failed: ${message}`,
+      );
     }
 
     if (event.type === 'checkout.session.completed') {
@@ -117,7 +127,7 @@ export class PaymentsService {
         const pi =
           typeof session.payment_intent === 'string'
             ? session.payment_intent
-            : session.payment_intent?.id ?? null;
+            : (session.payment_intent?.id ?? null);
         await this.invoices.markPaidFromStripe(invoiceId, session.id, pi);
       }
     }

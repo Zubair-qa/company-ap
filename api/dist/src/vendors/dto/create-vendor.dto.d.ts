@@ -1,4 +1,4 @@
-import { VendorKind } from '@prisma/client';
+import { VendorKind } from '../../common/domain';
 export declare class CreateVendorDto {
     displayName: string;
     legalName?: string;

@@ -7,8 +7,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
-import { Role } from '@prisma/client';
 import type { Request } from 'express';
+import { Role } from '../common/domain';
 import { Public } from '../common/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';

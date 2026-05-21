@@ -1,6 +1,6 @@
 import { IsEnum, IsOptional, IsString, IsNumber, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { VendorKind } from '@prisma/client';
+import { VendorKind } from '../../common/domain';
 
 export class CreateVendorBodyDto {
   @IsString()

@@ -18,7 +18,7 @@ const platform_express_1 = require("@nestjs/platform-express");
 const multer_1 = require("multer");
 const path_1 = require("path");
 const fs_1 = require("fs");
-const client_1 = require("@prisma/client");
+const domain_1 = require("../common/domain");
 const roles_decorator_1 = require("../auth/roles.decorator");
 const roles_guard_1 = require("../auth/roles.guard");
 const invoices_service_1 = require("./invoices.service");
@@ -45,7 +45,7 @@ let InvoiceFilesController = class InvoiceFilesController {
 exports.InvoiceFilesController = InvoiceFilesController;
 __decorate([
     (0, common_1.Post)('upload'),
-    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK),
+    (0, roles_decorator_1.Roles)(domain_1.Role.COMPANY_ADMIN, domain_1.Role.AP_CLERK),
     (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file', {
         storage: (0, multer_1.diskStorage)({
             destination: (_req, _file, cb) => cb(null, uploadDir()),

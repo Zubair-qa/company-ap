@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { Role } from '../../common/domain';
 export declare class LoginDto {
     email: string;
     password: string;

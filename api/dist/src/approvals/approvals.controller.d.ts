@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { Role } from '../common/domain';
 import { ApprovalsService } from './approvals.service';
 import { ApprovalDecisionDto } from './dto/approval-decision.dto';
 export declare class ApprovalsController {
@@ -11,6 +11,7 @@ export declare class ApprovalsController {
             departmentId: string | null;
         };
     }): Promise<{
+        extracted: unknown;
         department: {
             id: string;
             name: string;
@@ -36,10 +37,9 @@ export declare class ApprovalsController {
             taxNumber: string | null;
             displayName: string;
             legalName: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
+            kind: string;
             active: boolean;
         } | null;
-    } & {
         id: string;
         departmentId: string;
         createdAt: Date;
@@ -48,11 +48,10 @@ export declare class ApprovalsController {
         amountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
-        status: import(".prisma/client").$Enums.InvoiceStatus;
+        status: string;
         fileRelPath: string | null;
         originalFilename: string | null;
         mimeType: string | null;
-        extracted: import("@prisma/client/runtime/library").JsonValue | null;
         vendorId: string | null;
         submittedById: string;
         stripeCheckoutSessionId: string | null;

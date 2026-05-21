@@ -14,7 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PaymentsController = void 0;
 const common_1 = require("@nestjs/common");
-const client_1 = require("@prisma/client");
+const domain_1 = require("../common/domain");
 const public_decorator_1 = require("../common/public.decorator");
 const roles_decorator_1 = require("../auth/roles.decorator");
 const roles_guard_1 = require("../auth/roles.guard");
@@ -44,7 +44,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('invoice/:invoiceId/checkout'),
     (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
-    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK),
+    (0, roles_decorator_1.Roles)(domain_1.Role.COMPANY_ADMIN, domain_1.Role.AP_CLERK),
     __param(0, (0, common_1.Param)('invoiceId')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),

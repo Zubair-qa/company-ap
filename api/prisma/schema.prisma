@@ -3,31 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
-}
-
-enum Role {
-  COMPANY_ADMIN
-  AP_CLERK
-  DEPT_ADMIN
-}
-
-enum VendorKind {
-  RECURRING
-  ONE_OFF
-}
-
-enum InvoiceStatus {
-  UPLOADED
-  EXTRACTED
-  VENDOR_UNVERIFIED
-  VENDOR_VERIFIED
-  AWAITING_APPROVAL
-  APPROVED
-  REJECTED
-  PAYMENT_INITIATED
-  PAID
 }
 
 model Department {
@@ -42,7 +19,7 @@ model User {
   email          String       @unique
   passwordHash   String
   name           String
-  role           Role
+  role           String
   departmentId String?
   department     Department?  @relation(fields: [departmentId], references: [id])
   submittedInvoices Invoice[] @relation("SubmittedInvoices")
@@ -56,7 +33,7 @@ model Vendor {
   displayName String
   legalName   String?
   taxNumber   String?    @unique
-  kind        VendorKind @default(RECURRING)
+  kind        String     @default("RECURRING")
   active      Boolean    @default(true)
   invoices    Invoice[]
   createdAt   DateTime   @default(now())
@@ -66,14 +43,14 @@ model Vendor {
 model Invoice {
   id                 String        @id @default(uuid())
   reference          String?
-  amountPkr          Decimal       @db.Decimal(14, 2)
+  amountPkr          Decimal
   dueDate            DateTime?
   description        String?
-  status             InvoiceStatus @default(UPLOADED)
+  status             String        @default("UPLOADED")
   fileRelPath        String?
   originalFilename   String?
   mimeType           String?
-  extracted          Json?
+  extracted          String?
   vendorId           String?
   vendor             Vendor?       @relation(fields: [vendorId], references: [id])
   departmentId       String

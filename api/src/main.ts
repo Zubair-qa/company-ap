@@ -13,7 +13,10 @@ async function bootstrap() {
     }),
   );
   const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
-  app.enableCors({ origin: frontend, credentials: true });
+  const allowedOrigins = Array.from(
+    new Set([frontend, 'http://localhost:5173', 'http://127.0.0.1:5173']),
+  );
+  app.enableCors({ origin: allowedOrigins, credentials: true });
   const port = Number(process.env.PORT) || 4000;
   await app.listen(port);
 }

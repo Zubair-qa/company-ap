@@ -1,0 +1,47 @@
+
+> api@0.0.1 start:dev
+> nest start --watch
+
+[2J[3J[H[[90m6:03:47 pm[0m] Starting compilation in watch mode...
+
+[[90m6:04:01 pm[0m] Found 0 errors. Watching for file changes.
+
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:24 pm [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:24 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPrismaModule dependencies initialized[39m[38;5;3m +15ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:24 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPassportModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +225ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +5ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJwtModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDepartmentsModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mVendorsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mInvoicesModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mApprovalsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuthModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPaymentsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAppController {/api}:[39m[38;5;3m +3ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/health, GET} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/api/auth}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/auth/login, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/auth/register, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/auth/me, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mDepartmentsController {/api/departments}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/departments, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mVendorsController {/api/vendors}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/vendors, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/vendors, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mInvoicesController {/api/invoices}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/invoices, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/invoices/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/invoices/:id, PATCH} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/invoices/:id/submit-approval, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/invoices/import/google-csv, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mInvoiceFilesController {/api/invoice-files}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/invoice-files/upload, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mApprovalsController {/api/approvals}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/approvals/:invoiceId, POST} route[39m[38;5;3m +2ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mPaymentsController {/api/payments}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/payments/stripe/webhook, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/payments/invoice/:invoiceId/checkout, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 27156  - [39m20/05/2026, 6:04:25 pm [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +13ms[39m

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceStatus, Role } from '@prisma/client';
+import { InvoiceStatus, Role, decodeJson } from '../common/domain';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -41,7 +41,7 @@ export class ApprovalsService {
       ? InvoiceStatus.APPROVED
       : InvoiceStatus.REJECTED;
 
-    return this.prisma.invoice.update({
+    const updated = await this.prisma.invoice.update({
       where: { id: invoiceId },
       data: { status: nextStatus },
       include: {
@@ -54,5 +54,6 @@ export class ApprovalsService {
         },
       },
     });
+    return { ...updated, extracted: decodeJson(updated.extracted) };
   }
 }

@@ -14,7 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.InvoicesController = void 0;
 const common_1 = require("@nestjs/common");
-const client_1 = require("@prisma/client");
+const domain_1 = require("../common/domain");
 const roles_decorator_1 = require("../auth/roles.decorator");
 const roles_guard_1 = require("../auth/roles.guard");
 const invoice_dto_1 = require("./dto/invoice.dto");
@@ -58,7 +58,7 @@ __decorate([
 ], InvoicesController.prototype, "getOne", null);
 __decorate([
     (0, common_1.Patch)(':id'),
-    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK),
+    (0, roles_decorator_1.Roles)(domain_1.Role.COMPANY_ADMIN, domain_1.Role.AP_CLERK),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Body)()),
     __param(2, (0, common_1.Req)()),
@@ -68,7 +68,7 @@ __decorate([
 ], InvoicesController.prototype, "patch", null);
 __decorate([
     (0, common_1.Post)(':id/submit-approval'),
-    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK),
+    (0, roles_decorator_1.Roles)(domain_1.Role.COMPANY_ADMIN, domain_1.Role.AP_CLERK),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Req)()),
     __metadata("design:type", Function),
@@ -77,7 +77,7 @@ __decorate([
 ], InvoicesController.prototype, "submit", null);
 __decorate([
     (0, common_1.Post)('import/google-csv'),
-    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK),
+    (0, roles_decorator_1.Roles)(domain_1.Role.COMPANY_ADMIN, domain_1.Role.AP_CLERK),
     __param(0, (0, common_1.Body)()),
     __param(1, (0, common_1.Req)()),
     __metadata("design:type", Function),

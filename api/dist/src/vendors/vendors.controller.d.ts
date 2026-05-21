@@ -10,7 +10,7 @@ export declare class VendorsController {
         taxNumber: string | null;
         displayName: string;
         legalName: string | null;
-        kind: import(".prisma/client").$Enums.VendorKind;
+        kind: string;
         active: boolean;
     }[]>;
     create(dto: CreateVendorDto): import(".prisma/client").Prisma.Prisma__VendorClient<{
@@ -20,7 +20,7 @@ export declare class VendorsController {
         taxNumber: string | null;
         displayName: string;
         legalName: string | null;
-        kind: import(".prisma/client").$Enums.VendorKind;
+        kind: string;
         active: boolean;
     }, never, import("@prisma/client/runtime/library").DefaultArgs>;
 }

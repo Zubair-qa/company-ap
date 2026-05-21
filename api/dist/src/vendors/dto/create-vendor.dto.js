@@ -12,7 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CreateVendorDto = void 0;
 const class_validator_1 = require("class-validator");
 const class_transformer_1 = require("class-transformer");
-const client_1 = require("@prisma/client");
+const domain_1 = require("../../common/domain");
 class CreateVendorDto {
     displayName;
     legalName;
@@ -36,7 +36,7 @@ __decorate([
     __metadata("design:type", String)
 ], CreateVendorDto.prototype, "taxNumber", void 0);
 __decorate([
-    (0, class_validator_1.IsEnum)(client_1.VendorKind),
+    (0, class_validator_1.IsEnum)(domain_1.VendorKind),
     __metadata("design:type", String)
 ], CreateVendorDto.prototype, "kind", void 0);
 __decorate([

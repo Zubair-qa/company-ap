@@ -14,7 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ApprovalsController = void 0;
 const common_1 = require("@nestjs/common");
-const client_1 = require("@prisma/client");
+const domain_1 = require("../common/domain");
 const roles_decorator_1 = require("../auth/roles.decorator");
 const roles_guard_1 = require("../auth/roles.guard");
 const approvals_service_1 = require("./approvals.service");
@@ -31,7 +31,7 @@ let ApprovalsController = class ApprovalsController {
 exports.ApprovalsController = ApprovalsController;
 __decorate([
     (0, common_1.Post)(':invoiceId'),
-    (0, roles_decorator_1.Roles)(client_1.Role.DEPT_ADMIN, client_1.Role.COMPANY_ADMIN),
+    (0, roles_decorator_1.Roles)(domain_1.Role.DEPT_ADMIN, domain_1.Role.COMPANY_ADMIN),
     __param(0, (0, common_1.Param)('invoiceId')),
     __param(1, (0, common_1.Body)()),
     __param(2, (0, common_1.Req)()),

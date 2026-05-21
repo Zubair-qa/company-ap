@@ -29,7 +29,7 @@ export declare class InvoiceFilesController {
             taxNumber: string | null;
             displayName: string;
             legalName: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
+            kind: string;
             active: boolean;
         } | null;
         submittedBy: {
@@ -46,14 +46,16 @@ export declare class InvoiceFilesController {
         amountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
-        status: import(".prisma/client").$Enums.InvoiceStatus;
+        status: string;
         fileRelPath: string | null;
         originalFilename: string | null;
         mimeType: string | null;
-        extracted: import("@prisma/client/runtime/library").JsonValue | null;
+        extracted: string | null;
         vendorId: string | null;
         submittedById: string;
         stripeCheckoutSessionId: string | null;
         stripePaymentIntentId: string | null;
+    } & {
+        extracted: unknown;
     }>;
 }

@@ -4,10 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InvoiceStatus } from '@prisma/client';
 import type { Request } from 'express';
 import type { RawBodyRequest } from '@nestjs/common';
 import Stripe from 'stripe';
+import { InvoiceStatus } from '../common/domain';
 import { PrismaService } from '../prisma/prisma.service';
 import { InvoicesService } from '../invoices/invoices.service';
 

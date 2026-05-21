@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const client_1 = require("@prisma/client");
 const bcrypt = __importStar(require("bcrypt"));
+const domain_1 = require("../src/common/domain");
 const prisma = new client_1.PrismaClient();
 async function main() {
     const passwordHash = await bcrypt.hash('changeme123', 10);
@@ -67,14 +68,14 @@ async function main() {
         update: {
             name: 'Company Admin',
             passwordHash,
-            role: client_1.Role.COMPANY_ADMIN,
+            role: domain_1.Role.COMPANY_ADMIN,
             departmentId: admin.id,
         },
         create: {
             email: 'admin@demo.local',
             name: 'Company Admin',
             passwordHash,
-            role: client_1.Role.COMPANY_ADMIN,
+            role: domain_1.Role.COMPANY_ADMIN,
             departmentId: admin.id,
         },
     });
@@ -83,14 +84,14 @@ async function main() {
         update: {
             name: 'AP Clerk',
             passwordHash,
-            role: client_1.Role.AP_CLERK,
+            role: domain_1.Role.AP_CLERK,
             departmentId: finance.id,
         },
         create: {
             email: 'ap@demo.local',
             name: 'AP Clerk',
             passwordHash,
-            role: client_1.Role.AP_CLERK,
+            role: domain_1.Role.AP_CLERK,
             departmentId: finance.id,
         },
     });
@@ -99,14 +100,14 @@ async function main() {
         update: {
             name: 'Engineering Dept Admin',
             passwordHash,
-            role: client_1.Role.DEPT_ADMIN,
+            role: domain_1.Role.DEPT_ADMIN,
             departmentId: engineering.id,
         },
         create: {
             email: 'eng-admin@demo.local',
             name: 'Engineering Dept Admin',
             passwordHash,
-            role: client_1.Role.DEPT_ADMIN,
+            role: domain_1.Role.DEPT_ADMIN,
             departmentId: engineering.id,
         },
     });
@@ -115,14 +116,14 @@ async function main() {
         update: {
             name: 'Finance Dept Admin',
             passwordHash,
-            role: client_1.Role.DEPT_ADMIN,
+            role: domain_1.Role.DEPT_ADMIN,
             departmentId: finance.id,
         },
         create: {
             email: 'finance-admin@demo.local',
             name: 'Finance Dept Admin',
             passwordHash,
-            role: client_1.Role.DEPT_ADMIN,
+            role: domain_1.Role.DEPT_ADMIN,
             departmentId: finance.id,
         },
     });
@@ -134,7 +135,7 @@ async function main() {
             displayName: 'CloudHost Ltd',
             legalName: 'CloudHost Limited',
             taxNumber: 'NTN-1234567',
-            kind: client_1.VendorKind.RECURRING,
+            kind: domain_1.VendorKind.RECURRING,
         },
     });
     const consultant = await prisma.vendor.upsert({
@@ -143,7 +144,7 @@ async function main() {
         create: {
             id: '10000000-0000-0000-0000-000000000002',
             displayName: 'Ad-hoc Consultant',
-            kind: client_1.VendorKind.ONE_OFF,
+            kind: domain_1.VendorKind.ONE_OFF,
         },
     });
     const demoInvoices = [
@@ -152,7 +153,7 @@ async function main() {
             reference: 'FIN-2026-104',
             amountPkr: '185000',
             description: 'Monthly cloud hosting retainer',
-            status: client_1.InvoiceStatus.AWAITING_APPROVAL,
+            status: domain_1.InvoiceStatus.AWAITING_APPROVAL,
             departmentId: finance.id,
             submittedById: apClerk.id,
             vendorId: cloudHost.id,
@@ -169,7 +170,7 @@ async function main() {
             reference: 'ENG-2026-088',
             amountPkr: '425000',
             description: 'Infrastructure expansion milestone',
-            status: client_1.InvoiceStatus.APPROVED,
+            status: domain_1.InvoiceStatus.APPROVED,
             departmentId: engineering.id,
             submittedById: apClerk.id,
             vendorId: cloudHost.id,
@@ -186,7 +187,7 @@ async function main() {
             reference: 'ADM-2026-014',
             amountPkr: '62000',
             description: 'Office systems support',
-            status: client_1.InvoiceStatus.VENDOR_UNVERIFIED,
+            status: domain_1.InvoiceStatus.VENDOR_UNVERIFIED,
             departmentId: admin.id,
             submittedById: companyAdmin.id,
             vendorId: null,
@@ -202,7 +203,7 @@ async function main() {
             reference: 'FIN-2026-109',
             amountPkr: '94000',
             description: 'Quarterly compliance review',
-            status: client_1.InvoiceStatus.VENDOR_VERIFIED,
+            status: domain_1.InvoiceStatus.VENDOR_VERIFIED,
             departmentId: finance.id,
             submittedById: apClerk.id,
             vendorId: consultant.id,
@@ -218,7 +219,7 @@ async function main() {
             reference: 'ENG-2026-091',
             amountPkr: '145000',
             description: 'Prototype review workshop',
-            status: client_1.InvoiceStatus.PAID,
+            status: domain_1.InvoiceStatus.PAID,
             departmentId: engineering.id,
             submittedById: apClerk.id,
             vendorId: consultant.id,
@@ -240,7 +241,7 @@ async function main() {
             submittedById: invoice.submittedById,
             vendorId: invoice.vendorId,
             dueDate: invoice.dueDate,
-            extracted: invoice.extracted,
+            extracted: (0, domain_1.encodeJson)(invoice.extracted),
         };
         await prisma.invoice.upsert({
             where: { id: invoice.id },

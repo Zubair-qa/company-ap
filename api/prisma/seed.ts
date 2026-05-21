@@ -1,5 +1,6 @@
-import { InvoiceStatus, Prisma, PrismaClient, Role, VendorKind } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { InvoiceStatus, Role, VendorKind, encodeJson } from '../src/common/domain';
 
 const prisma = new PrismaClient();
 
@@ -218,7 +219,7 @@ async function main() {
       submittedById: invoice.submittedById,
       vendorId: invoice.vendorId,
       dueDate: invoice.dueDate,
-      extracted: invoice.extracted as Prisma.InputJsonValue,
+      extracted: encodeJson(invoice.extracted),
     };
 
     await prisma.invoice.upsert({

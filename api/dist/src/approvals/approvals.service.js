@@ -11,7 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ApprovalsService = void 0;
 const common_1 = require("@nestjs/common");
-const client_1 = require("@prisma/client");
+const domain_1 = require("../common/domain");
 const prisma_service_1 = require("../prisma/prisma.service");
 let ApprovalsService = class ApprovalsService {
     prisma;
@@ -22,10 +22,10 @@ let ApprovalsService = class ApprovalsService {
         const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
         if (!inv)
             throw new common_1.NotFoundException();
-        if (inv.status !== client_1.InvoiceStatus.AWAITING_APPROVAL) {
+        if (inv.status !== domain_1.InvoiceStatus.AWAITING_APPROVAL) {
             throw new common_1.BadRequestException('Invoice is not awaiting approval');
         }
-        if (user.role === client_1.Role.DEPT_ADMIN) {
+        if (user.role === domain_1.Role.DEPT_ADMIN) {
             if (!user.departmentId || inv.departmentId !== user.departmentId) {
                 throw new common_1.ForbiddenException('You can only approve invoices for your department');
             }
@@ -39,9 +39,9 @@ let ApprovalsService = class ApprovalsService {
             },
         });
         const nextStatus = dto.approved
-            ? client_1.InvoiceStatus.APPROVED
-            : client_1.InvoiceStatus.REJECTED;
-        return this.prisma.invoice.update({
+            ? domain_1.InvoiceStatus.APPROVED
+            : domain_1.InvoiceStatus.REJECTED;
+        const updated = await this.prisma.invoice.update({
             where: { id: invoiceId },
             data: { status: nextStatus },
             include: {
@@ -54,6 +54,7 @@ let ApprovalsService = class ApprovalsService {
                 },
             },
         });
+        return { ...updated, extracted: (0, domain_1.decodeJson)(updated.extracted) };
     }
 };
 exports.ApprovalsService = ApprovalsService;

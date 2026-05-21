@@ -15,8 +15,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PaymentsService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
-const client_1 = require("@prisma/client");
 const stripe_1 = __importDefault(require("stripe"));
+const domain_1 = require("../common/domain");
 const prisma_service_1 = require("../prisma/prisma.service");
 const invoices_service_1 = require("../invoices/invoices.service");
 const STRIPE_API_VERSION = '2026-04-22.dahlia';
@@ -38,7 +38,7 @@ let PaymentsService = class PaymentsService {
         const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
         if (!inv)
             throw new common_1.NotFoundException();
-        if (inv.status !== client_1.InvoiceStatus.APPROVED) {
+        if (inv.status !== domain_1.InvoiceStatus.APPROVED) {
             throw new common_1.BadRequestException('Invoice must be approved before payment');
         }
         const key = this.config.get('STRIPE_SECRET_KEY');
@@ -74,7 +74,7 @@ let PaymentsService = class PaymentsService {
         await this.prisma.invoice.update({
             where: { id: invoiceId },
             data: {
-                status: client_1.InvoiceStatus.PAYMENT_INITIATED,
+                status: domain_1.InvoiceStatus.PAYMENT_INITIATED,
                 stripeCheckoutSessionId: session.id,
             },
         });

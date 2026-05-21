@@ -14,7 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VendorsController = void 0;
 const common_1 = require("@nestjs/common");
-const client_1 = require("@prisma/client");
+const domain_1 = require("../common/domain");
 const roles_decorator_1 = require("../auth/roles.decorator");
 const roles_guard_1 = require("../auth/roles.guard");
 const prisma_service_1 = require("../prisma/prisma.service");
@@ -45,14 +45,14 @@ let VendorsController = class VendorsController {
 exports.VendorsController = VendorsController;
 __decorate([
     (0, common_1.Get)(),
-    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK, client_1.Role.DEPT_ADMIN),
+    (0, roles_decorator_1.Roles)(domain_1.Role.COMPANY_ADMIN, domain_1.Role.AP_CLERK, domain_1.Role.DEPT_ADMIN),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], VendorsController.prototype, "list", null);
 __decorate([
     (0, common_1.Post)(),
-    (0, roles_decorator_1.Roles)(client_1.Role.COMPANY_ADMIN, client_1.Role.AP_CLERK),
+    (0, roles_decorator_1.Roles)(domain_1.Role.COMPANY_ADMIN, domain_1.Role.AP_CLERK),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [create_vendor_dto_1.CreateVendorDto]),

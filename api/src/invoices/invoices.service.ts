@@ -4,9 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvoiceStatus, Prisma, Role, Vendor } from '@prisma/client';
+import { Prisma, Vendor } from '@prisma/client';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
+import { InvoiceStatus, Role, decodeJson, encodeJson } from '../common/domain';
 import { PrismaService } from '../prisma/prisma.service';
 import { PatchInvoiceDto } from './dto/invoice.dto';
 import { parseSpreadsheetBuffer } from './invoice-parse.util';
@@ -29,6 +30,21 @@ const invoiceInclude = Prisma.validator<Prisma.InvoiceInclude>()({
   submittedBy: { select: { id: true, name: true, email: true } },
   approvals: { orderBy: { createdAt: 'desc' }, take: 3 },
 });
+
+function decodeInvoice<T extends { extracted: string | null }>(invoice: T) {
+  return { ...invoice, extracted: decodeJson(invoice.extracted) };
+}
+
+function decodeInvoices<T extends { extracted: string | null }>(invoices: T[]) {
+  return invoices.map(decodeInvoice);
+}
+
+function extractedRecord(value: string | null) {
+  const decoded = decodeJson(value);
+  return decoded && typeof decoded === 'object'
+    ? (decoded as Record<string, unknown>)
+    : null;
+}
 
 @Injectable()
 export class InvoicesService {
@@ -83,7 +99,7 @@ export class InvoicesService {
         fileRelPath: relPath,
         originalFilename: file.originalname,
         mimeType: file.mimetype,
-        extracted: extracted as Prisma.InputJsonValue,
+        extracted: encodeJson(extracted),
         amountPkr,
         reference,
         description,
@@ -95,10 +111,11 @@ export class InvoicesService {
       return this.applyVendorMatch(inv.id);
     }
 
-    return this.prisma.invoice.findUniqueOrThrow({
+    const created = await this.prisma.invoice.findUniqueOrThrow({
       where: { id: inv.id },
       include: invoiceInclude,
     });
+    return decodeInvoice(created);
   }
 
   private async applyVendorMatch(invoiceId: string) {
@@ -106,20 +123,22 @@ export class InvoicesService {
     if (!inv) throw new NotFoundException();
 
     if (inv.vendorId && inv.status === InvoiceStatus.VENDOR_VERIFIED) {
-      return this.prisma.invoice.findUniqueOrThrow({
+      const current = await this.prisma.invoice.findUniqueOrThrow({
         where: { id: invoiceId },
         include: invoiceInclude,
       });
+      return decodeInvoice(current);
     }
 
-    if (!inv.extracted || typeof inv.extracted !== 'object') {
-      return this.prisma.invoice.findUniqueOrThrow({
+    const e = extractedRecord(inv.extracted);
+    if (!e) {
+      const current = await this.prisma.invoice.findUniqueOrThrow({
         where: { id: invoiceId },
         include: invoiceInclude,
       });
+      return decodeInvoice(current);
     }
 
-    const e = inv.extracted as Record<string, unknown>;
     let vendor: Vendor | null = null;
 
     if (e.vendorTaxNumber) {
@@ -139,7 +158,7 @@ export class InvoicesService {
     }
 
     if (vendor) {
-      return this.prisma.invoice.update({
+      const updated = await this.prisma.invoice.update({
         where: { id: invoiceId },
         data: {
           vendorId: vendor.id,
@@ -147,13 +166,15 @@ export class InvoicesService {
         },
         include: invoiceInclude,
       });
+      return decodeInvoice(updated);
     }
 
-    return this.prisma.invoice.update({
+    const updated = await this.prisma.invoice.update({
       where: { id: invoiceId },
       data: { status: InvoiceStatus.VENDOR_UNVERIFIED },
       include: invoiceInclude,
     });
+    return decodeInvoice(updated);
   }
 
   async patchInvoice(
@@ -195,8 +216,10 @@ export class InvoicesService {
       include: invoiceInclude,
     });
 
-    if (dto.vendorId) return updated;
-    if (inv.vendorId && inv.status === InvoiceStatus.VENDOR_VERIFIED) return updated;
+    if (dto.vendorId) return decodeInvoice(updated);
+    if (inv.vendorId && inv.status === InvoiceStatus.VENDOR_VERIFIED) {
+      return decodeInvoice(updated);
+    }
 
     return this.applyVendorMatch(id);
   }
@@ -213,11 +236,12 @@ export class InvoicesService {
       );
     }
 
-    return this.prisma.invoice.update({
+    const updated = await this.prisma.invoice.update({
       where: { id },
       data: { status: InvoiceStatus.AWAITING_APPROVAL },
       include: invoiceInclude,
     });
+    return decodeInvoice(updated);
   }
 
   async listForUser(user: {
@@ -231,15 +255,15 @@ export class InvoicesService {
     };
 
     if (user.role === Role.COMPANY_ADMIN || user.role === Role.AP_CLERK) {
-      return this.prisma.invoice.findMany(args);
+      return decodeInvoices(await this.prisma.invoice.findMany(args));
     }
 
     if (user.role === Role.DEPT_ADMIN) {
       if (!user.departmentId) return [];
-      return this.prisma.invoice.findMany({
+      return decodeInvoices(await this.prisma.invoice.findMany({
         ...args,
         where: { departmentId: user.departmentId },
-      });
+      }));
     }
 
     return [];
@@ -267,7 +291,7 @@ export class InvoicesService {
       }
     }
 
-    return inv;
+    return decodeInvoice(inv);
   }
 
   async importFromPublishedCsvUrl(url: string, submittedById: string) {
@@ -294,7 +318,7 @@ export class InvoicesService {
       data: {
         departmentId: department.id,
         submittedById,
-        extracted: extracted as Prisma.InputJsonValue,
+        extracted: encodeJson(extracted),
         amountPkr: new Prisma.Decimal(extracted.amountPkr ?? 0),
         reference: extracted.reference ?? null,
         description:
@@ -312,7 +336,7 @@ export class InvoicesService {
     sessionId: string | null,
     piId: string | null,
   ) {
-    return this.prisma.invoice.update({
+    const updated = await this.prisma.invoice.update({
       where: { id: invoiceId },
       data: {
         status: InvoiceStatus.PAID,
@@ -321,5 +345,6 @@ export class InvoicesService {
       },
       include: invoiceInclude,
     });
+    return decodeInvoice(updated);
   }
 }

@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { Role } from '../common/domain';
 import { GoogleCsvDto, PatchInvoiceDto } from './dto/invoice.dto';
 import { InvoicesService } from './invoices.service';
 export declare class InvoicesController {
@@ -30,7 +30,7 @@ export declare class InvoicesController {
             taxNumber: string | null;
             displayName: string;
             legalName: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
+            kind: string;
             active: boolean;
         } | null;
         submittedBy: {
@@ -47,15 +47,17 @@ export declare class InvoicesController {
         amountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
-        status: import(".prisma/client").$Enums.InvoiceStatus;
+        status: string;
         fileRelPath: string | null;
         originalFilename: string | null;
         mimeType: string | null;
-        extracted: import("@prisma/client/runtime/library").JsonValue | null;
+        extracted: string | null;
         vendorId: string | null;
         submittedById: string;
         stripeCheckoutSessionId: string | null;
         stripePaymentIntentId: string | null;
+    } & {
+        extracted: unknown;
     })[]>;
     getOne(id: string, req: {
         user: {
@@ -89,7 +91,7 @@ export declare class InvoicesController {
             taxNumber: string | null;
             displayName: string;
             legalName: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
+            kind: string;
             active: boolean;
         } | null;
         submittedBy: {
@@ -106,15 +108,17 @@ export declare class InvoicesController {
         amountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
-        status: import(".prisma/client").$Enums.InvoiceStatus;
+        status: string;
         fileRelPath: string | null;
         originalFilename: string | null;
         mimeType: string | null;
-        extracted: import("@prisma/client/runtime/library").JsonValue | null;
+        extracted: string | null;
         vendorId: string | null;
         submittedById: string;
         stripeCheckoutSessionId: string | null;
         stripePaymentIntentId: string | null;
+    } & {
+        extracted: unknown;
     }>;
     patch(id: string, dto: PatchInvoiceDto, req: {
         user: {
@@ -141,7 +145,7 @@ export declare class InvoicesController {
             taxNumber: string | null;
             displayName: string;
             legalName: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
+            kind: string;
             active: boolean;
         } | null;
         submittedBy: {
@@ -158,15 +162,17 @@ export declare class InvoicesController {
         amountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
-        status: import(".prisma/client").$Enums.InvoiceStatus;
+        status: string;
         fileRelPath: string | null;
         originalFilename: string | null;
         mimeType: string | null;
-        extracted: import("@prisma/client/runtime/library").JsonValue | null;
+        extracted: string | null;
         vendorId: string | null;
         submittedById: string;
         stripeCheckoutSessionId: string | null;
         stripePaymentIntentId: string | null;
+    } & {
+        extracted: unknown;
     }>;
     submit(id: string, req: {
         user: {
@@ -192,7 +198,7 @@ export declare class InvoicesController {
             taxNumber: string | null;
             displayName: string;
             legalName: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
+            kind: string;
             active: boolean;
         } | null;
         submittedBy: {
@@ -209,15 +215,17 @@ export declare class InvoicesController {
         amountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
-        status: import(".prisma/client").$Enums.InvoiceStatus;
+        status: string;
         fileRelPath: string | null;
         originalFilename: string | null;
         mimeType: string | null;
-        extracted: import("@prisma/client/runtime/library").JsonValue | null;
+        extracted: string | null;
         vendorId: string | null;
         submittedById: string;
         stripeCheckoutSessionId: string | null;
         stripePaymentIntentId: string | null;
+    } & {
+        extracted: unknown;
     }>;
     importGoogleCsv(dto: GoogleCsvDto, req: {
         user: {
@@ -243,7 +251,7 @@ export declare class InvoicesController {
             taxNumber: string | null;
             displayName: string;
             legalName: string | null;
-            kind: import(".prisma/client").$Enums.VendorKind;
+            kind: string;
             active: boolean;
         } | null;
         submittedBy: {
@@ -260,14 +268,16 @@ export declare class InvoicesController {
         amountPkr: import("@prisma/client/runtime/library").Decimal;
         dueDate: Date | null;
         description: string | null;
-        status: import(".prisma/client").$Enums.InvoiceStatus;
+        status: string;
         fileRelPath: string | null;
         originalFilename: string | null;
         mimeType: string | null;
-        extracted: import("@prisma/client/runtime/library").JsonValue | null;
+        extracted: string | null;
         vendorId: string | null;
         submittedById: string;
         stripeCheckoutSessionId: string | null;
         stripePaymentIntentId: string | null;
+    } & {
+        extracted: unknown;
     }>;
 }

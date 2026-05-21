@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { AxiosError } from 'axios';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
@@ -21,11 +22,29 @@ type InvoiceDetail = {
   vendor: Vendor | null;
 };
 
+type ApiError = {
+  message?: string | string[];
+};
+
+type CheckoutResponse = {
+  url: string | null;
+  sessionId: string;
+  status: string | null;
+};
+
 const pkr = new Intl.NumberFormat('en-PK', {
   style: 'currency',
   currency: 'PKR',
   maximumFractionDigits: 0,
 });
+
+const lockedStatuses = new Set(['PAYMENT_INITIATED', 'PAID']);
+const payableStatuses = new Set([
+  'APPROVED',
+  'PAYMENT_INITIATED',
+  'PAYMENT_FAILED',
+  'PAYMENT_EXPIRED',
+]);
 
 export function InvoiceDetailPage() {
   const { id } = useParams();
@@ -90,23 +109,26 @@ export function InvoiceDetailPage() {
 
   const pay = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post<{ url: string | null }>(
+      const { data } = await api.post<CheckoutResponse>(
         `/api/payments/invoice/${id}/checkout`,
       );
       return data;
     },
     onSuccess: (data) => {
       if (data.url) window.location.href = data.url;
+      else qc.invalidateQueries({ queryKey: ['invoice', id] });
     },
   });
 
-  const canEdit = user?.role === 'AP_CLERK' || user?.role === 'COMPANY_ADMIN';
+  const canEdit =
+    (user?.role === 'AP_CLERK' || user?.role === 'COMPANY_ADMIN') &&
+    !lockedStatuses.has(inv?.status ?? '');
   const canApprove =
     (user?.role === 'DEPT_ADMIN' || user?.role === 'COMPANY_ADMIN') &&
     inv?.status === 'AWAITING_APPROVAL';
   const canPay =
     (user?.role === 'AP_CLERK' || user?.role === 'COMPANY_ADMIN') &&
-    inv?.status === 'APPROVED';
+    payableStatuses.has(inv?.status ?? '');
 
   const editForm = useMemo(() => {
     if (!inv) return null;
@@ -122,6 +144,7 @@ export function InvoiceDetailPage() {
   }, [inv, departments, vendors, patch]);
 
   if (!id) return <p className="error">Missing id</p>;
+  const paymentError = getApiErrorMessage(pay.error);
   if (isLoading || !inv) return <p className="muted">Loading…</p>;
 
   return (
@@ -151,12 +174,6 @@ export function InvoiceDetailPage() {
             <strong>Description:</strong> {inv.description}
           </p>
         ) : null}
-        <details style={{ marginTop: '0.75rem' }}>
-          <summary>Extracted JSON</summary>
-          <pre style={{ fontSize: 12, overflow: 'auto' }}>
-            {JSON.stringify(inv.extracted, null, 2)}
-          </pre>
-        </details>
       </div>
 
       {canEdit ? editForm : null}
@@ -211,7 +228,7 @@ export function InvoiceDetailPage() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Pay with Stripe</h3>
           <p className="muted">
-            Opens Stripe Checkout in PKR. Configure <code>STRIPE_SECRET_KEY</code> on the API.
+            You will be redirected to Stripe Checkout to complete this payment in PKR.
           </p>
           <button
             type="button"
@@ -219,15 +236,33 @@ export function InvoiceDetailPage() {
             disabled={pay.isPending}
             onClick={() => pay.mutate()}
           >
-            Pay now
+            {pay.isPending
+              ? 'Opening Stripe...'
+              : inv.status === 'PAYMENT_INITIATED'
+                ? 'Resume payment'
+                : inv.status === 'PAYMENT_FAILED' ||
+                    inv.status === 'PAYMENT_EXPIRED'
+                  ? 'Retry payment'
+                : 'Pay now'}
           </button>
-          {pay.isError ? (
-            <p className="error">Stripe not configured or invoice not payable.</p>
-          ) : null}
+          {paymentError ? <p className="error">{paymentError}</p> : null}
         </div>
       ) : null}
     </div>
   );
+}
+
+function getApiErrorMessage(error: unknown) {
+  if (!error) return null;
+  const axiosError = error as AxiosError<ApiError>;
+  const message = axiosError.response?.data?.message;
+  const text = Array.isArray(message) ? message.join(' ') : message;
+  if (text?.includes('Stripe is not configured')) {
+    return 'Payments are not configured for this environment.';
+  }
+  if (text) return text;
+  if (error instanceof Error) return error.message;
+  return 'Could not start Stripe Checkout.';
 }
 
 function EditInvoiceForm({

@@ -45,10 +45,17 @@ const statusMeta: Array<{ key: string; label: string; tone: Tone }> = [
   { key: 'APPROVED', label: 'Approved', tone: 'emerald' },
   { key: 'REJECTED', label: 'Rejected', tone: 'rose' },
   { key: 'PAYMENT_INITIATED', label: 'Payment started', tone: 'indigo' },
+  { key: 'PAYMENT_FAILED', label: 'Payment failed', tone: 'rose' },
+  { key: 'PAYMENT_EXPIRED', label: 'Payment expired', tone: 'amber' },
   { key: 'PAID', label: 'Paid', tone: 'emerald' },
 ];
 
-const payableStatuses = new Set(['APPROVED', 'PAYMENT_INITIATED']);
+const payableStatuses = new Set([
+  'APPROVED',
+  'PAYMENT_INITIATED',
+  'PAYMENT_FAILED',
+  'PAYMENT_EXPIRED',
+]);
 const pendingStatuses = new Set([
   'UPLOADED',
   'EXTRACTED',
@@ -57,6 +64,8 @@ const pendingStatuses = new Set([
   'AWAITING_APPROVAL',
   'APPROVED',
   'PAYMENT_INITIATED',
+  'PAYMENT_FAILED',
+  'PAYMENT_EXPIRED',
 ]);
 
 function amountOf(invoice: InvoiceRow) {
@@ -155,7 +164,14 @@ export function DashboardPage() {
     const statuses =
       user?.role === 'DEPT_ADMIN'
         ? ['AWAITING_APPROVAL']
-        : ['VENDOR_UNVERIFIED', 'EXTRACTED', 'VENDOR_VERIFIED', 'APPROVED'];
+        : [
+            'VENDOR_UNVERIFIED',
+            'EXTRACTED',
+            'VENDOR_VERIFIED',
+            'APPROVED',
+            'PAYMENT_FAILED',
+            'PAYMENT_EXPIRED',
+          ];
     return invoices.filter((inv) => statuses.includes(inv.status)).slice(0, 6);
   }, [invoices, user?.role]);
 

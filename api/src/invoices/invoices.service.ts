@@ -312,6 +312,16 @@ export class InvoicesService {
     sessionId: string | null,
     piId: string | null,
   ) {
+    const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!inv) throw new NotFoundException();
+
+    if (inv.status === InvoiceStatus.PAID) {
+      return this.prisma.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+        include: invoiceInclude,
+      });
+    }
+
     return this.prisma.invoice.update({
       where: { id: invoiceId },
       data: {

@@ -45,8 +45,9 @@ export function LoginPage() {
       <h2 style={{ marginTop: 0 }}>Sign in</h2>
       <p className="muted">
         Demo users (password <code>changeme123</code>): <code>ap@demo.local</code>,{' '}
-        <code>finance-admin@demo.local</code>, <code>eng-admin@demo.local</code>,{' '}
-        <code>admin@demo.local</code>
+        <code>finance-user@demo.local</code>, <code>eng-user@demo.local</code>,{' '}
+        <code>eng-admin@demo.local</code>, <code>finance-admin@demo.local</code>,{' '}
+        <code>cfo@demo.local</code>, <code>admin@demo.local</code>
       </p>
       <form onSubmit={onSubmit}>
         <div className="field">

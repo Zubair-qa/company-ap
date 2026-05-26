@@ -594,6 +594,50 @@ th {
   font-weight: 600;
 }
 
+.payment-status-page {
+  display: grid;
+  place-items: start center;
+  min-height: calc(100vh - 150px);
+  padding: 3rem 1rem;
+}
+
+.payment-status-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem;
+  width: min(100%, 760px);
+  padding: 1.35rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 5px solid #0e7490;
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgb(15 23 42 / 9%);
+}
+
+.payment-status-processing {
+  border-left-color: #10b981;
+}
+
+.payment-status-cancelled {
+  border-left-color: #f59e0b;
+}
+
+.payment-status-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-weight: 900;
+}
+
+.payment-status-cancelled .payment-status-icon {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .tickets-page,
 .ticket-detail-page {
   display: flex;
@@ -793,6 +837,29 @@ th {
 .priority-high {
   background: #fef3c7;
   color: #92400e;
+}
+
+.payment-status-content h2 {
+  margin: 0;
+  color: #132238;
+  font-size: clamp(1.45rem, 2.2vw, 2rem);
+  line-height: 1.15;
+}
+
+.payment-status-description {
+  max-width: 620px;
+  margin: 0.65rem 0 0;
+  color: #334155;
+}
+
+.payment-session {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
 }
 
 .priority-urgent {
@@ -1071,6 +1138,28 @@ th {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #f8fafc;
+}
+
+.payment-session span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.payment-session code {
+  color: #334155;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.payment-status-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1.1rem;
 }
 
 .attachment-row > span {
@@ -1377,5 +1466,9 @@ th {
   .ticket-save-bar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .payment-status-card {
+    grid-template-columns: 1fr;
   }
 }

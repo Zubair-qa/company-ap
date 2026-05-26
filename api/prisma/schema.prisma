@@ -10,7 +10,9 @@ datasource db {
 enum Role {
   COMPANY_ADMIN
   AP_CLERK
+  DEPT_USER
   DEPT_ADMIN
+  CFO
 }
 
 enum VendorKind {
@@ -30,11 +32,208 @@ enum InvoiceStatus {
   PAID
 }
 
+enum TicketStatus {
+  NEW_REQUEST
+  DEPARTMENT_HEAD_APPROVAL
+  DOCS_REVIEW
+  MISSING_DOCS
+  REQUESTER_PINGED
+  WAITING_FOR_DOCS
+  VENDOR_PO_ACCOUNT_VERIFICATION
+  WHT_CALCULATION
+  VOUCHER_GENERATION
+  XERO_BILL_ENTRY
+  PAYMENT_PREPARATION
+  BANK_UPLOAD
+  CFO_SIGN_PENDING
+  BANK_EXECUTION_PENDING
+  BANK_EXECUTED
+  MARKED_PAID_IN_XERO
+  REQUESTER_NOTIFIED
+  PAYMENT_COMPLETE
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ExpenseNature {
+  REPAIR_MAINTENANCE
+  UTILITIES
+  OFFICE_SUPPLIES
+  PROFESSIONAL_SERVICES
+  SOFTWARE_CLOUD
+  TRAVEL
+  CAPEX
+  OTHER
+}
+
+enum BillType {
+  STANDARD_INVOICE
+  PROFORMA
+  ADVANCE_PARTIAL
+  FINAL_PARTIAL
+  REIMBURSEMENT
+  CASH_SLIP
+  EMAIL_INVOICE
+}
+
+enum PaymentMethod {
+  BANK_PORTAL
+  CHEQUE
+  CASH
+}
+
+enum DocumentStatus {
+  PENDING_REVIEW
+  COMPLETE
+  INCOMPLETE
+}
+
+enum AccountVerificationStatus {
+  NOT_CHECKED
+  MATCHED
+  INVOICE_MISSING_VERIFIED_FROM_SHEET
+  MISMATCH
+  NEEDS_MANUAL_REVIEW
+}
+
+enum XeroSyncStatus {
+  NOT_READY
+  READY_TO_SYNC
+  BILL_CREATED
+  SYNC_FAILED
+  PAID_MARKED
+}
+
+enum BankPaymentStatus {
+  NOT_READY
+  READY_FOR_UPLOAD
+  UPLOADED
+  CFO_SIGNED
+  EXECUTED
+  FAILED
+}
+
+enum FilerStatus {
+  FILER
+  NON_FILER
+  UNKNOWN
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  APPROVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum VerificationType {
+  GOODS_SERVICES
+  PO_RECEIPTS
+  ACCURACY
+  COMPLIANCE
+}
+
+enum VerificationStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum QueryStatus {
+  OPEN
+  RESPONDED
+  CLOSED
+}
+
+enum ApprovalAction {
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+enum PaymentBatchStatus {
+  DRAFT
+  EXPORTED
+  UPLOADED_TO_BANK
+  PROCESSED
+  FAILED
+  PARTIALLY_PROCESSED
+}
+
+enum PaymentRecordStatus {
+  SCHEDULED
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum ReconciliationStatus {
+  MATCHED
+  DISCREPANCY
+  RESOLVED
+}
+
+enum TaxCodeType {
+  SALES_TAX
+  WITHHOLDING
+}
+
+enum DocumentType {
+  INVOICE
+  GRN
+  DELIVERY_NOTE
+  CONTRACT
+  RECEIPT
+  PO
+  OTHER
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  EXPORT
+  IMPORT
+  APPROVE
+  REJECT
+  RETURN
+  SYNC
+}
+
+enum NotificationType {
+  APPROVAL_PENDING
+  QUERY_RAISED
+  QUERY_RESPONDED
+  PAYMENT_FAILED
+  PAYMENT_COMPLETED
+  MISSING_DOCUMENTS
+  OVERDUE
+  XERO_SYNC_FAILED
+}
+
 model Department {
-  id       String    @id @default(uuid())
-  name     String
-  users    User[]
-  invoices Invoice[]
+  id             String    @id @default(uuid())
+  code           String?   @unique
+  name           String
+  headUserId     String?
+  headUser       User?     @relation("DepartmentHead", fields: [headUserId], references: [id])
+  active         Boolean   @default(true)
+  users          User[]    @relation("UserDepartment")
+  invoices       Invoice[]
+  tickets        PaymentTicket[]
+  purchaseOrders PurchaseOrder[]
+  assignedQueries InterdepartmentalQuery[] @relation("QueryAssignedDepartment")
+  approvalMatrix ApprovalMatrix[]
 }
 
 model User {
@@ -44,36 +243,88 @@ model User {
   name           String
   role           Role
   departmentId String?
-  department     Department?  @relation(fields: [departmentId], references: [id])
+  department     Department?  @relation("UserDepartment", fields: [departmentId], references: [id])
+  headedDepartments Department[] @relation("DepartmentHead")
+  active         Boolean      @default(true)
+  lastLoginAt    DateTime?
   submittedInvoices Invoice[] @relation("SubmittedInvoices")
+  assignedTickets PaymentTicket[] @relation("AssignedTickets")
+  createdTickets  PaymentTicket[] @relation("CreatedTickets")
+  ticketActivities TicketActivity[]
   approvals      Approval[]
+  purchaseOrders PurchaseOrder[]
+  uploadedDocuments SupportingDocument[]
+  verifications Verification[]
+  raisedQueries InterdepartmentalQuery[] @relation("QueryRaisedBy")
+  assignedQueries InterdepartmentalQuery[] @relation("QueryAssignedUser")
+  matrixRules ApprovalMatrix[]
+  exportedBatches PaymentBatch[] @relation("BatchExportedBy")
+  initiatedPayments PaymentRecord[] @relation("PaymentInitiatedBy")
+  authorizedPayments PaymentRecord[] @relation("PaymentAuthorizedBy")
+  reconciliations Reconciliation[]
+  auditLogs AuditLog[]
+  notifications Notification[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }
 
 model Vendor {
-  id          String     @id @default(uuid())
-  displayName String
-  legalName   String?
-  taxNumber   String?    @unique
-  kind        VendorKind @default(RECURRING)
-  active      Boolean    @default(true)
-  invoices    Invoice[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id                 String     @id @default(uuid())
+  vendorCode         String?    @unique
+  displayName        String
+  legalName          String?
+  taxNumber          String?    @unique
+  ntn                String?
+  strn               String?
+  address            String?
+  city               String?
+  country            String?    @default("PK")
+  contactPerson      String?
+  phone              String?
+  email              String?
+  bankName           String?
+  bankAccountTitle   String?
+  iban               String?
+  bankAccountNumber  String?
+  swiftCode          String?
+  currency           String     @default("PKR") @db.Char(3)
+  paymentTermsDays   Int        @default(30)
+  withholdingTaxRate Decimal?   @db.Decimal(5, 2)
+  kind               VendorKind @default(RECURRING)
+  active             Boolean    @default(true)
+  invoices           Invoice[]
+  tickets            PaymentTicket[]
+  purchaseOrders     PurchaseOrder[]
+  paymentRecords     PaymentRecord[]
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
 }
 
 model Invoice {
   id                 String        @id @default(uuid())
+  internalRef        String?       @unique
+  invoiceNumber      String?
   reference          String?
   amountPkr          Decimal       @db.Decimal(14, 2)
+  invoiceDate        DateTime?
+  receivedDate       DateTime?
   dueDate            DateTime?
+  currency           String        @default("PKR") @db.Char(3)
+  subtotal           Decimal       @default(0) @db.Decimal(18, 2)
+  taxAmount          Decimal       @default(0) @db.Decimal(18, 2)
+  withholdingTax     Decimal       @default(0) @db.Decimal(18, 2)
+  totalAmount        Decimal       @default(0) @db.Decimal(18, 2)
+  amountPaid         Decimal       @default(0) @db.Decimal(18, 2)
+  balanceDue         Decimal       @default(0) @db.Decimal(18, 2)
   description        String?
   status             InvoiceStatus @default(UPLOADED)
+  currentStage       Int           @default(1)
   fileRelPath        String?
   originalFilename   String?
   mimeType           String?
   extracted          Json?
+  poId               String?
+  purchaseOrder      PurchaseOrder? @relation(fields: [poId], references: [id])
   vendorId           String?
   vendor             Vendor?       @relation(fields: [vendorId], references: [id])
   departmentId       String
@@ -82,9 +333,19 @@ model Invoice {
   submittedBy        User          @relation("SubmittedInvoices", fields: [submittedById], references: [id])
   stripeCheckoutSessionId String?
   stripePaymentIntentId   String?
+  ticket             PaymentTicket?
+  lineItems          InvoiceLineItem[]
+  supportingDocuments SupportingDocument[]
+  verifications      Verification[]
+  queries            InterdepartmentalQuery[]
+  paymentRecords     PaymentRecord[]
   approvals          Approval[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
+
+  @@index([vendorId, invoiceNumber])
+  @@index([status, currentStage])
+  @@index([dueDate])
 }
 
 model Approval {
@@ -94,6 +355,364 @@ model Approval {
   approverId String
   approver   User     @relation(fields: [approverId], references: [id])
   approved   Boolean
+  action      ApprovalAction?
+  approvalLevel Int?
+  ipAddress  String?
   note       String?
   createdAt  DateTime @default(now())
+}
+
+model PurchaseOrder {
+  id                   String              @id @default(uuid())
+  poNumber             String              @unique
+  vendorId             String
+  vendor               Vendor              @relation(fields: [vendorId], references: [id])
+  departmentId         String
+  department           Department          @relation(fields: [departmentId], references: [id])
+  requestedByUserId    String
+  requestedBy          User                @relation(fields: [requestedByUserId], references: [id])
+  poDate               DateTime
+  expectedDeliveryDate DateTime?
+  currency             String              @default("PKR") @db.Char(3)
+  subtotal             Decimal             @default(0) @db.Decimal(18, 2)
+  taxAmount            Decimal             @default(0) @db.Decimal(18, 2)
+  totalAmount          Decimal             @default(0) @db.Decimal(18, 2)
+  status               PurchaseOrderStatus @default(DRAFT)
+  notes                String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  lineItems            PoLineItem[]
+  invoices             Invoice[]
+  supportingDocuments  SupportingDocument[]
+
+  @@index([departmentId])
+  @@index([vendorId])
+  @@index([status])
+}
+
+model PoLineItem {
+  id              String        @id @default(uuid())
+  poId            String
+  purchaseOrder   PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  lineNo          Int
+  description     String
+  quantity        Decimal       @db.Decimal(14, 3)
+  unit            String?
+  unitPrice       Decimal       @db.Decimal(18, 4)
+  taxCodeId       String?
+  taxCode         TaxCode?      @relation(fields: [taxCodeId], references: [id])
+  lineTotal       Decimal       @db.Decimal(18, 2)
+  glAccountCode   String?
+  invoiceLineItems InvoiceLineItem[]
+
+  @@unique([poId, lineNo])
+}
+
+model InvoiceLineItem {
+  id             String      @id @default(uuid())
+  invoiceId      String
+  invoice        Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  poLineItemId   String?
+  poLineItem     PoLineItem? @relation(fields: [poLineItemId], references: [id])
+  lineNo         Int
+  description    String
+  quantity       Decimal     @db.Decimal(14, 3)
+  unitPrice      Decimal     @db.Decimal(18, 4)
+  taxCodeId      String?
+  taxCode        TaxCode?    @relation(fields: [taxCodeId], references: [id])
+  lineTotal      Decimal     @db.Decimal(18, 2)
+  glAccountCode  String?
+
+  @@unique([invoiceId, lineNo])
+}
+
+model SupportingDocument {
+  id               String       @id @default(uuid())
+  invoiceId        String?
+  invoice          Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  poId             String?
+  purchaseOrder    PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: Cascade)
+  ticketId         String?
+  ticket           PaymentTicket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  documentType     DocumentType
+  fileName         String
+  filePath         String
+  mimeType         String
+  fileSize         BigInt
+  uploadedByUserId String
+  uploadedBy       User         @relation(fields: [uploadedByUserId], references: [id])
+  uploadedAt       DateTime     @default(now())
+
+  @@index([invoiceId])
+  @@index([poId])
+  @@index([ticketId])
+}
+
+model Verification {
+  id               String             @id @default(uuid())
+  invoiceId        String
+  invoice          Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  verifiedByUserId String
+  verifiedBy       User               @relation(fields: [verifiedByUserId], references: [id])
+  verificationType VerificationType
+  status           VerificationStatus @default(PENDING)
+  comments         String?
+  verifiedAt       DateTime?
+
+  @@index([invoiceId])
+}
+
+model InterdepartmentalQuery {
+  id                     String       @id @default(uuid())
+  invoiceId              String
+  invoice                Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  raisedByUserId         String
+  raisedBy               User         @relation("QueryRaisedBy", fields: [raisedByUserId], references: [id])
+  assignedToUserId       String?
+  assignedToUser         User?        @relation("QueryAssignedUser", fields: [assignedToUserId], references: [id])
+  assignedToDepartmentId String?
+  assignedToDepartment   Department?  @relation("QueryAssignedDepartment", fields: [assignedToDepartmentId], references: [id])
+  queryText              String
+  responseText           String?
+  status                 QueryStatus  @default(OPEN)
+  raisedAt               DateTime     @default(now())
+  respondedAt            DateTime?
+  closedAt               DateTime?
+
+  @@index([invoiceId, status])
+}
+
+model ApprovalMatrix {
+  id             String     @id @default(uuid())
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  currency       String     @default("PKR") @db.Char(3)
+  minAmount      Decimal    @db.Decimal(18, 2)
+  maxAmount      Decimal    @db.Decimal(18, 2)
+  requiredRole   Role
+  requiredUserId String?
+  requiredUser   User?      @relation(fields: [requiredUserId], references: [id])
+  approvalLevel  Int
+  active         Boolean    @default(true)
+
+  @@index([departmentId, active])
+}
+
+model PaymentBatch {
+  id               String             @id @default(uuid())
+  batchNumber      String             @unique
+  batchDate        DateTime
+  currency         String             @default("PKR") @db.Char(3)
+  totalCount       Int                @default(0)
+  totalAmount      Decimal            @default(0) @db.Decimal(18, 2)
+  status           PaymentBatchStatus @default(DRAFT)
+  exportedFilePath String?
+  exportedByUserId String?
+  exportedBy       User?              @relation("BatchExportedBy", fields: [exportedByUserId], references: [id])
+  exportedAt       DateTime?
+  uploadedAt       DateTime?
+  processedAt      DateTime?
+  payments         PaymentRecord[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+}
+
+model PaymentRecord {
+  id                     String              @id @default(uuid())
+  paymentRef             String              @unique
+  invoiceId              String
+  invoice                Invoice             @relation(fields: [invoiceId], references: [id])
+  vendorId               String
+  vendor                 Vendor              @relation(fields: [vendorId], references: [id])
+  batchId                String?
+  batch                  PaymentBatch?       @relation(fields: [batchId], references: [id])
+  paymentDate            DateTime
+  paymentMethod          PaymentMethod
+  amount                 Decimal             @db.Decimal(18, 2)
+  withholdingTaxDeducted Decimal             @default(0) @db.Decimal(18, 2)
+  currency               String              @default("PKR") @db.Char(3)
+  meezanTransactionRef   String?
+  status                 PaymentRecordStatus @default(SCHEDULED)
+  bankResponseCode       String?
+  bankResponseMessage    String?
+  initiatedByUserId      String
+  initiatedBy            User                @relation("PaymentInitiatedBy", fields: [initiatedByUserId], references: [id])
+  authorizedByUserId     String?
+  authorizedBy           User?               @relation("PaymentAuthorizedBy", fields: [authorizedByUserId], references: [id])
+  reconciliations        Reconciliation[]
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  @@index([invoiceId])
+  @@index([batchId])
+  @@index([status])
+}
+
+model Reconciliation {
+  id                 String               @id @default(uuid())
+  paymentId          String
+  payment            PaymentRecord        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  bankStatementRef   String?
+  statementDate      DateTime
+  reconciledAmount   Decimal              @db.Decimal(18, 2)
+  status             ReconciliationStatus @default(MATCHED)
+  discrepancyNotes   String?
+  reconciledByUserId String
+  reconciledBy       User                 @relation(fields: [reconciledByUserId], references: [id])
+  reconciledAt       DateTime             @default(now())
+}
+
+model TaxCode {
+  id       String      @id @default(uuid())
+  code     String      @unique
+  name     String
+  rate     Decimal     @db.Decimal(5, 2)
+  type     TaxCodeType
+  active   Boolean     @default(true)
+  poLineItems PoLineItem[]
+  invoiceLineItems InvoiceLineItem[]
+}
+
+model GlAccount {
+  id              String      @id @default(uuid())
+  accountCode     String      @unique
+  accountName     String
+  accountType     String
+  parentAccountId String?
+  parentAccount   GlAccount?  @relation("GlTree", fields: [parentAccountId], references: [id])
+  childAccounts   GlAccount[] @relation("GlTree")
+  active          Boolean     @default(true)
+}
+
+model AuditLog {
+  id                BigInt      @id @default(autoincrement())
+  entityType        String
+  entityId          String
+  action            AuditAction
+  performedByUserId String?
+  performedBy       User?       @relation(fields: [performedByUserId], references: [id])
+  oldValue          Json?
+  newValue          Json?
+  ipAddress         String?
+  userAgent         String?
+  createdAt         DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  link      String?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, read, createdAt])
+}
+
+model XeroConnection {
+  id             String    @id @default(uuid())
+  tenantId       String    @unique
+  tenantName     String?
+  accessToken    String?
+  refreshToken   String?
+  expiresAt      DateTime?
+  connectedAt    DateTime  @default(now())
+  lastSyncedAt    DateTime?
+  active         Boolean   @default(true)
+}
+
+model PaymentTicket {
+  id                        String                    @id @default(uuid())
+  title                     String
+  status                    TicketStatus              @default(NEW_REQUEST)
+  priority                  TicketPriority            @default(NORMAL)
+  requesterName             String?
+  requesterEmail            String?
+  departmentId              String
+  department                Department                @relation(fields: [departmentId], references: [id])
+  assignedToId              String?
+  assignedTo                User?                     @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  createdById               String?
+  createdBy                 User?                     @relation("CreatedTickets", fields: [createdById], references: [id])
+  submittedToFinanceAt      DateTime?
+  dueDate                   DateTime?
+  expenseNature             ExpenseNature             @default(OTHER)
+  billType                  BillType                  @default(STANDARD_INVOICE)
+  vendorId                  String?
+  vendor                    Vendor?                   @relation(fields: [vendorId], references: [id])
+  vendorNameSnapshot        String?
+  purchaseOrderNumber       String?
+  purchaseOrderRequired     Boolean                   @default(true)
+  purchaseOrderVerified     Boolean                   @default(false)
+  invoiceNumber             String?
+  internalReference         String?
+  amountPkr                 Decimal                   @default(0) @db.Decimal(14, 2)
+  paymentMethod             PaymentMethod             @default(BANK_PORTAL)
+  vendorAccountNumber       String?
+  invoiceAccountNumber      String?
+  accountVerificationStatus AccountVerificationStatus @default(NOT_CHECKED)
+  accountVerificationSource String?
+  documentStatus            DocumentStatus            @default(PENDING_REVIEW)
+  missingDocuments          String[]                  @default([])
+  xeroSyncStatus            XeroSyncStatus            @default(NOT_READY)
+  xeroContactId             String?
+  xeroBillId                String?
+  xeroBillNumber            String?
+  xeroPaymentId             String?
+  xeroLastSyncedAt          DateTime?
+  xeroError                 String?
+  whtFilerStatus            FilerStatus               @default(UNKNOWN)
+  whtRate                   Decimal?                  @db.Decimal(5, 2)
+  whtAmountPkr              Decimal?                  @db.Decimal(14, 2)
+  netPayablePkr             Decimal?                  @db.Decimal(14, 2)
+  voucherNumber             String?
+  voucherGeneratedAt        DateTime?
+  bankPaymentStatus         BankPaymentStatus         @default(NOT_READY)
+  bankPortalReference       String?
+  bankUploadedAt            DateTime?
+  cfoSignedAt               DateTime?
+  bankExecutedAt            DateTime?
+  requesterNotifiedAt       DateTime?
+  trelloCardId              String?
+  trelloUrl                 String?
+  legacySheetRowId          String?
+  legacySheetName           String?
+  oldReference              String?
+  parentTicketId            String?
+  parentTicket              PaymentTicket?            @relation("PartialPayments", fields: [parentTicketId], references: [id])
+  childTickets              PaymentTicket[]           @relation("PartialPayments")
+  invoiceId                 String?                   @unique
+  invoice                   Invoice?                  @relation(fields: [invoiceId], references: [id])
+  notes                     String?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  activities                TicketActivity[]
+  attachments               SupportingDocument[]
+
+  @@index([status, priority])
+  @@index([departmentId])
+  @@index([assignedToId])
+  @@index([dueDate])
+  @@index([vendorId])
+}
+
+model TicketActivity {
+  id         String        @id @default(uuid())
+  ticketId   String
+  ticket     PaymentTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actorId    String?
+  actor      User?         @relation(fields: [actorId], references: [id])
+  type       String
+  message    String
+  fromStatus TicketStatus?
+  toStatus   TicketStatus?
+  createdAt  DateTime      @default(now())
+
+  @@index([ticketId, createdAt])
 }

@@ -6,10 +6,14 @@ import {
 } from '@nestjs/common';
 import { InvoiceStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { InvoicesService } from '../invoices/invoices.service';
 
 @Injectable()
 export class ApprovalsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private invoices: InvoicesService,
+  ) {}
 
   async decide(
     invoiceId: string,
@@ -41,7 +45,7 @@ export class ApprovalsService {
       ? InvoiceStatus.APPROVED
       : InvoiceStatus.REJECTED;
 
-    return this.prisma.invoice.update({
+    const updated = await this.prisma.invoice.update({
       where: { id: invoiceId },
       data: { status: nextStatus },
       include: {
@@ -54,5 +58,11 @@ export class ApprovalsService {
         },
       },
     });
+
+    if (dto.approved) {
+      return this.invoices.releaseApprovedInvoiceToFinance(invoiceId, user.id);
+    }
+
+    return this.invoices.returnRejectedInvoiceToDepartment(invoiceId, user.id, dto.note);
   }
 }

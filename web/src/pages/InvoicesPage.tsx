@@ -20,8 +20,10 @@ const pkr = new Intl.NumberFormat('en-PK', {
 
 export function InvoicesPage() {
   const { user } = useAuth();
+  const canUseInvoices = user?.role === 'DEPT_USER';
   const { data, isLoading, error } = useQuery({
     queryKey: ['invoices'],
+    enabled: canUseInvoices,
     queryFn: async () => {
       const { data } = await api.get<InvoiceRow[]>('/api/invoices');
       return data;
@@ -30,15 +32,28 @@ export function InvoicesPage() {
 
   if (!user) return null;
 
+  if (!canUseInvoices) {
+    return (
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Invoice creation is department-owned</h2>
+        <p className="muted">
+          Finance and CFO users process approved AP tickets from the board. New invoice
+          submissions are created only by department requesters.
+        </p>
+        <Link to="/" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+          Back to payment board
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ marginTop: 0 }}>Invoices</h2>
-        {(user.role === 'DEPT_USER' || user.role === 'COMPANY_ADMIN') && (
-          <Link to="/upload" className="btn btn-primary" style={{ textDecoration: 'none' }}>
-            Create invoice
-          </Link>
-        )}
+        <Link to="/upload" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+          Create invoice
+        </Link>
       </div>
       {isLoading ? <p className="muted">Loading…</p> : null}
       {error ? <p className="error">Failed to load invoices.</p> : null}

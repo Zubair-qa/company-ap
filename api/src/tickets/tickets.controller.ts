@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UploadedFile,
@@ -18,11 +19,18 @@ import { existsSync, mkdirSync } from 'fs';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import type { Response } from 'express';
+import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CreateTicketDto, TicketCommentDto, UpdateTicketDto } from './dto/ticket.dto';
 import { TicketsService } from './tickets.service';
 
 type RequestUser = { id: string; role: Role; departmentId: string | null };
+type FinanceDashboardQuery = {
+  month?: string;
+  compareMonth?: string;
+  quarter?: string;
+  compareQuarter?: string;
+};
 
 function ticketAttachmentDir() {
   const dir = `${process.env.UPLOAD_DIR || './uploads'}/ticket-attachments`;
@@ -43,6 +51,15 @@ export class TicketsController {
   @Get('board')
   board(@Req() req: { user: RequestUser }) {
     return this.tickets.board(req.user);
+  }
+
+  @Get('finance-dashboard')
+  @Roles(Role.AP_CLERK, Role.CFO)
+  financeDashboard(
+    @Req() req: { user: RequestUser },
+    @Query() query: FinanceDashboardQuery,
+  ) {
+    return this.tickets.financeDashboard(req.user, query);
   }
 
   @Get()

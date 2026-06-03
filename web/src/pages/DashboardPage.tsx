@@ -1,33 +1,86 @@
-import { useMemo } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 
-type InvoiceRow = {
+type Trend = 'increase' | 'decrease' | 'flat';
+type Classification = 'OPEX' | 'CAPEX';
+
+type FinanceDriver = {
   id: string;
-  reference: string | null;
-  amountPkr: string;
+  title: string;
+  department: string;
+  vendor: string;
+  amount: number;
   status: string;
-  createdAt?: string;
-  dueDate?: string | null;
-  description?: string | null;
-  department: { name: string };
-  vendor: { displayName: string } | null;
+  statusLabel: string;
+};
+
+type FinanceVarianceRow = {
+  key: string;
+  label: string;
+  classification?: Classification;
+  currentAmount: number;
+  previousAmount: number;
+  varianceAmount: number;
+  variancePercent: number;
+  trend: Trend;
+  drivers: FinanceDriver[];
+};
+
+type FinanceTreeNode = {
+  id: string;
+  label: string;
+  level: 'classification' | 'group' | 'head' | 'item';
+  classification?: Classification;
+  currentAmount: number;
+  previousAmount: number;
+  varianceAmount: number;
+  variancePercent: number;
+  trend: Trend;
+  children: FinanceTreeNode[];
+};
+
+type PeriodOption = {
+  key: string;
+  label: string;
+};
+
+type FinanceDashboard = {
+  generatedAt: string;
+  currentMonth: { key: string; label: string };
+  previousMonth: { key: string; label: string };
+  currentQuarter: { key: string; label: string };
+  previousQuarter: { key: string; label: string };
+  availableMonths: PeriodOption[];
+  availableQuarters: PeriodOption[];
+  summary: {
+    totalSpend: number;
+    previousSpend: number;
+    varianceAmount: number;
+    variancePercent: number;
+    opex: number;
+    capex: number;
+    openExposure: number;
+    paidAmount: number;
+    ticketCount: number;
+    currentMonthTicketCount: number;
+  };
+  opexCapex: FinanceVarianceRow[];
+  monthlyComparison: FinanceVarianceRow[];
+  quarterlyComparison: FinanceVarianceRow[];
+  expenseTree: FinanceTreeNode[];
+  topMovers: {
+    increases: FinanceVarianceRow[];
+    decreases: FinanceVarianceRow[];
+  };
+  insights: Array<{ title: string; severity: string; body: string }>;
 };
 
 type Tone = 'cyan' | 'emerald' | 'amber' | 'rose' | 'indigo' | 'slate';
 
-type DepartmentBucket = {
-  name: string;
-  amount: number;
-  count: number;
-  pending: number;
-};
-
 const pkr = new Intl.NumberFormat('en-PK', {
-  style: 'currency',
-  currency: 'PKR',
   maximumFractionDigits: 0,
 });
 
@@ -36,334 +89,367 @@ const compactPkr = new Intl.NumberFormat('en-PK', {
   maximumFractionDigits: 1,
 });
 
-const statusMeta: Array<{ key: string; label: string; tone: Tone }> = [
-  { key: 'UPLOADED', label: 'Uploaded', tone: 'slate' },
-  { key: 'EXTRACTED', label: 'Extracted', tone: 'indigo' },
-  { key: 'VENDOR_UNVERIFIED', label: 'Vendor review', tone: 'amber' },
-  { key: 'VENDOR_VERIFIED', label: 'Vendor verified', tone: 'cyan' },
-  { key: 'APPROVED', label: 'Released to AP', tone: 'emerald' },
-  { key: 'REJECTED', label: 'Rejected', tone: 'rose' },
-  { key: 'PAYMENT_INITIATED', label: 'Payment started', tone: 'indigo' },
-  { key: 'PAYMENT_FAILED', label: 'Payment failed', tone: 'rose' },
-  { key: 'PAYMENT_EXPIRED', label: 'Payment expired', tone: 'amber' },
-  { key: 'PAID', label: 'Paid', tone: 'emerald' },
+const monthOptions = [
+  { value: '01', label: 'Jan' },
+  { value: '02', label: 'Feb' },
+  { value: '03', label: 'Mar' },
+  { value: '04', label: 'Apr' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'Jun' },
+  { value: '07', label: 'Jul' },
+  { value: '08', label: 'Aug' },
+  { value: '09', label: 'Sep' },
+  { value: '10', label: 'Oct' },
+  { value: '11', label: 'Nov' },
+  { value: '12', label: 'Dec' },
 ];
 
-const payableStatuses = new Set([
-  'APPROVED',
-  'PAYMENT_INITIATED',
-  'PAYMENT_FAILED',
-  'PAYMENT_EXPIRED',
-]);
-const pendingStatuses = new Set([
-  'UPLOADED',
-  'EXTRACTED',
-  'VENDOR_UNVERIFIED',
-  'VENDOR_VERIFIED',
-  'APPROVED',
-  'PAYMENT_INITIATED',
-  'PAYMENT_FAILED',
-  'PAYMENT_EXPIRED',
-]);
-
-function amountOf(invoice: InvoiceRow) {
-  const amount = Number(invoice.amountPkr);
-  return Number.isFinite(amount) ? amount : 0;
-}
+const quarterOptions = [
+  { value: 'Q1', label: 'Q1' },
+  { value: 'Q2', label: 'Q2' },
+  { value: 'Q3', label: 'Q3' },
+  { value: 'Q4', label: 'Q4' },
+];
 
 function money(amount: number) {
-  return pkr.format(amount);
+  return `PKR ${pkr.format(Math.round(amount || 0))}`;
 }
 
-function statusLabel(status: string) {
-  return statusMeta.find((item) => item.key === status)?.label ?? status.replaceAll('_', ' ');
+function compactMoney(amount: number) {
+  return `PKR ${compactPkr.format(Math.round(amount || 0))}`;
 }
 
-function statusTone(status: string): Tone {
-  return statusMeta.find((item) => item.key === status)?.tone ?? 'slate';
+function signedMoney(amount: number) {
+  if (Math.abs(amount) < 1) return money(0);
+  const sign = amount > 0 ? '+' : '-';
+  return `${sign}${money(Math.abs(amount))}`;
 }
 
-function displayPersonName(name: string | undefined | null) {
-  return name === 'AP Clerk' ? 'AP Finance' : name ?? '';
+function percent(value: number) {
+  if (Math.abs(value) < 0.01) return '0%';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(1)}%`;
 }
 
-function displayRole(role: string) {
+function trendClass(trend: Trend) {
+  if (trend === 'increase') return 'trend-up';
+  if (trend === 'decrease') return 'trend-down';
+  return 'trend-flat';
+}
+
+function roleLabel(role: string) {
   if (role === 'AP_CLERK') return 'AP Finance';
   return role.replaceAll('_', ' ');
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return 'No date';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'No date';
-  return date.toLocaleDateString('en-PK', { day: '2-digit', month: 'short' });
+function yearFromPeriodKey(key: string) {
+  const year = Number(key.slice(0, 4));
+  return Number.isFinite(year) ? year : new Date().getFullYear();
+}
+
+function buildYearRange(data: FinanceDashboard) {
+  const years = [
+    ...data.availableMonths.map((item) => yearFromPeriodKey(item.key)),
+    ...data.availableQuarters.map((item) => yearFromPeriodKey(item.key)),
+    yearFromPeriodKey(data.currentMonth.key),
+    yearFromPeriodKey(data.previousMonth.key),
+    yearFromPeriodKey(data.currentQuarter.key),
+    yearFromPeriodKey(data.previousQuarter.key),
+    new Date().getFullYear(),
+  ];
+  const minYear = Math.min(...years) - 1;
+  const maxYear = Math.max(...years) + 1;
+  return Array.from({ length: maxYear - minYear + 1 }, (_, index) => maxYear - index);
+}
+
+function buildMonthYearOptions(data: FinanceDashboard): PeriodOption[] {
+  return buildYearRange(data).flatMap((year) =>
+    monthOptions
+      .slice()
+      .reverse()
+      .map((month) => ({
+        key: `${year}-${month.value}`,
+        label: `${month.label} ${year}`,
+      })),
+  );
+}
+
+function buildQuarterYearOptions(data: FinanceDashboard): PeriodOption[] {
+  return buildYearRange(data).flatMap((year) =>
+    quarterOptions
+      .slice()
+      .reverse()
+      .map((quarter) => ({
+        key: `${year}-${quarter.value}`,
+        label: `${quarter.label} ${year}`,
+      })),
+  );
 }
 
 export function DashboardPage() {
   const { user } = useAuth();
+  const [month, setMonth] = useState('');
+  const [compareMonth, setCompareMonth] = useState('');
+  const [quarter, setQuarter] = useState('');
+  const [compareQuarter, setCompareQuarter] = useState('');
+  const canViewDashboard = user?.role === 'AP_CLERK' || user?.role === 'CFO';
+  const params = new URLSearchParams();
+  if (month) params.set('month', month);
+  if (compareMonth) params.set('compareMonth', compareMonth);
+  if (quarter) params.set('quarter', quarter);
+  if (compareQuarter) params.set('compareQuarter', compareQuarter);
+  const dashboardQuery = params.toString();
   const { data, isLoading, error } = useQuery({
-    queryKey: ['invoices'],
+    queryKey: ['finance-dashboard', month, compareMonth, quarter, compareQuarter],
+    enabled: Boolean(canViewDashboard),
+    placeholderData: (previousData) => previousData,
     queryFn: async () => {
-      const { data } = await api.get<InvoiceRow[]>('/api/invoices');
+      const url = dashboardQuery
+        ? `/api/tickets/finance-dashboard?${dashboardQuery}`
+        : '/api/tickets/finance-dashboard';
+      const { data } = await api.get<FinanceDashboard>(url);
       return data;
     },
   });
 
-  const invoices = useMemo(() => data ?? [], [data]);
-
-  const dashboard = useMemo(() => {
-    const totalAmount = invoices.reduce((sum, inv) => sum + amountOf(inv), 0);
-    const pendingAmount = invoices
-      .filter((inv) => pendingStatuses.has(inv.status))
-      .reduce((sum, inv) => sum + amountOf(inv), 0);
-    const payableAmount = invoices
-      .filter((inv) => payableStatuses.has(inv.status))
-      .reduce((sum, inv) => sum + amountOf(inv), 0);
-    const paidAmount = invoices
-      .filter((inv) => inv.status === 'PAID')
-      .reduce((sum, inv) => sum + amountOf(inv), 0);
-    const releasedCount = invoices.filter((inv) => inv.status === 'APPROVED').length;
-    const reviewCount = invoices.filter((inv) =>
-      ['EXTRACTED', 'VENDOR_UNVERIFIED', 'VENDOR_VERIFIED'].includes(inv.status),
-    ).length;
-
-    const departmentTotals = Array.from(
-      invoices
-        .reduce((map, inv) => {
-          const key = inv.department.name;
-          const existing = map.get(key) ?? {
-            name: key,
-            amount: 0,
-            count: 0,
-            pending: 0,
-          };
-          existing.amount += amountOf(inv);
-          existing.count += 1;
-          if (pendingStatuses.has(inv.status)) existing.pending += amountOf(inv);
-          map.set(key, existing);
-          return map;
-        }, new Map<string, DepartmentBucket>())
-        .values(),
-    ).sort((a, b) => b.amount - a.amount);
-
-    const statusTotals = statusMeta.map((meta) => {
-      const matches = invoices.filter((inv) => inv.status === meta.key);
-      return {
-        ...meta,
-        count: matches.length,
-        amount: matches.reduce((sum, inv) => sum + amountOf(inv), 0),
-      };
-    });
-
-    return {
-      totalAmount,
-      pendingAmount,
-      payableAmount,
-      paidAmount,
-      awaitingCount: releasedCount,
-      reviewCount,
-      departmentTotals,
-      statusTotals,
-    };
-  }, [invoices]);
-
-  const actionInvoices = useMemo(() => {
-    const statuses =
-      user?.role === 'DEPT_USER'
-          ? ['REJECTED', 'EXTRACTED', 'VENDOR_UNVERIFIED', 'VENDOR_VERIFIED']
-        : [
-            'VENDOR_UNVERIFIED',
-            'EXTRACTED',
-            'VENDOR_VERIFIED',
-            'APPROVED',
-            'PAYMENT_FAILED',
-            'PAYMENT_EXPIRED',
-          ];
-    return invoices.filter((inv) => statuses.includes(inv.status)).slice(0, 6);
-  }, [invoices, user?.role]);
-
   if (!user) return null;
 
-  const canUpload = user.role === 'DEPT_USER' || user.role === 'COMPANY_ADMIN';
-  const roleName = displayRole(user.role);
-  const largestDepartment = Math.max(
-    1,
-    ...dashboard.departmentTotals.map((dept) => dept.amount),
-  );
-  const largestStatus = Math.max(1, ...dashboard.statusTotals.map((item) => item.count));
-  const recentInvoices = invoices.slice(0, 5);
+  if (!canViewDashboard) {
+    return (
+      <div className="dashboard-page finance-dashboard">
+        <section className="dashboard-hero finance-hero">
+          <div>
+            <p className="eyebrow">Restricted reporting</p>
+            <h2>Finance dashboard</h2>
+            <p className="dashboard-subtitle">
+              This dashboard is available only to AP Finance and CFO users.
+            </p>
+          </div>
+          <Link to="/" className="btn btn-secondary">
+            Back to board
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return <p className="muted">Loading finance dashboard...</p>;
+  }
+
+  if (error || !data) {
+    return <p className="error">Finance dashboard could not be loaded.</p>;
+  }
+
+  const splitTotal = Math.max(1, data.summary.opex + data.summary.capex);
+  const opexShare = (data.summary.opex / splitTotal) * 100;
+  const capexShare = (data.summary.capex / splitTotal) * 100;
+  const selectedMonth = month || data.currentMonth.key;
+  const selectedCompareMonth = compareMonth || data.previousMonth.key;
+  const selectedQuarter = quarter || data.currentQuarter.key;
+  const selectedCompareQuarter = compareQuarter || data.previousQuarter.key;
+  const selectableMonths = buildMonthYearOptions(data);
+  const selectableQuarters = buildQuarterYearOptions(data);
+  const resetPeriods = () => {
+    setMonth('');
+    setCompareMonth('');
+    setQuarter('');
+    setCompareQuarter('');
+  };
 
   return (
-    <div className="dashboard-page" data-testid="dashboard-page">
-      <section className="dashboard-hero">
+    <div className="dashboard-page finance-dashboard" data-testid="finance-dashboard">
+      <section className="dashboard-hero finance-hero">
         <div>
-          <p className="eyebrow">AP command center</p>
-          <h2>Dashboard</h2>
+          <p className="eyebrow">Finance analytics</p>
+          <h2>Expense monitoring dashboard</h2>
           <p className="dashboard-subtitle">
-            {user.departmentId ? `${displayPersonName(user.name)} / ${roleName}` : roleName}
+            {roleLabel(user.role)} view for month-to-month, QTR variance, OPEX/CAPEX,
+            and expense drill-downs.
           </p>
         </div>
         <div className="dashboard-hero-actions">
-          <span className="scope-pill">{invoices.length} invoices</span>
-          {canUpload ? (
-            <Link to="/upload" className="btn btn-primary">
-              Create invoice
-            </Link>
-          ) : null}
+          <span className="scope-pill">{data.currentMonth.label}</span>
+          <span className="scope-pill">{data.currentQuarter.label}</span>
+          <span className="scope-pill">{data.summary.ticketCount} AP tickets</span>
         </div>
       </section>
 
-      {isLoading ? <p className="muted">Loading dashboard...</p> : null}
-      {error ? <p className="error">Failed to load dashboard.</p> : null}
+      <section className="dashboard-panel finance-filter-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Period controls</p>
+            <h3>Select reporting periods</h3>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={resetPeriods}>
+            Reset current
+          </button>
+        </div>
+        <div className="period-filter-grid">
+          <PeriodSelect
+            label="Month"
+            value={selectedMonth}
+            options={selectableMonths}
+            onChange={setMonth}
+          />
+          <PeriodSelect
+            label="Compare month"
+            value={selectedCompareMonth}
+            options={selectableMonths}
+            onChange={setCompareMonth}
+          />
+          <PeriodSelect
+            label="Quarter"
+            value={selectedQuarter}
+            options={selectableQuarters}
+            onChange={setQuarter}
+          />
+          <PeriodSelect
+            label="Compare quarter"
+            value={selectedCompareQuarter}
+            options={selectableQuarters}
+            onChange={setCompareQuarter}
+          />
+        </div>
+      </section>
 
-      <section className="metric-grid" aria-label="Invoice metrics">
+      <section className="metric-grid" aria-label="Finance metrics">
         <MetricCard
-          label="Total tracked"
-          value={money(dashboard.totalAmount)}
-          detail={`${invoices.length} invoice${invoices.length === 1 ? '' : 's'}`}
+          label="Current month spend"
+          value={money(data.summary.totalSpend)}
+          detail={`${signedMoney(data.summary.varianceAmount)} vs ${data.previousMonth.label}`}
+          tone={data.summary.varianceAmount > 0 ? 'amber' : 'emerald'}
+        />
+        <MetricCard
+          label="OPEX"
+          value={money(data.summary.opex)}
+          detail={`${opexShare.toFixed(0)}% of current month`}
           tone="cyan"
         />
         <MetricCard
-          label="Open exposure"
-          value={money(dashboard.pendingAmount)}
-          detail="Not rejected or paid"
-          tone="amber"
-        />
-        <MetricCard
-          label="Ready to pay"
-          value={money(dashboard.payableAmount)}
-          detail={`${dashboard.awaitingCount} released to AP`}
-          tone="emerald"
-        />
-        <MetricCard
-          label="Paid"
-          value={money(dashboard.paidAmount)}
-          detail={`${dashboard.reviewCount} need AP review`}
+          label="CAPEX"
+          value={money(data.summary.capex)}
+          detail={`${capexShare.toFixed(0)}% of current month`}
           tone="indigo"
+        />
+        <MetricCard
+          label="Open exposure"
+          value={money(data.summary.openExposure)}
+          detail={`${money(data.summary.paidAmount)} paid/executed`}
+          tone="rose"
         />
       </section>
 
-      <div className="dashboard-grid">
-        <section className="dashboard-panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Cost centers</p>
-              <h3>Department spend</h3>
-            </div>
-            <Link to="/invoices">View all</Link>
-          </div>
-          {dashboard.departmentTotals.length ? (
-            <div className="bar-list">
-              {dashboard.departmentTotals.map((dept) => (
-                <div className="bar-row" key={dept.name}>
-                  <div className="bar-row-header">
-                    <strong>{dept.name}</strong>
-                    <span>{compactPkr.format(dept.amount)} PKR</span>
-                  </div>
-                  <div className="bar-track" aria-hidden="true">
-                    <span
-                      className="bar-fill"
-                      style={{ width: `${Math.max(4, (dept.amount / largestDepartment) * 100)}%` }}
-                    />
-                  </div>
-                  <div className="bar-row-meta">
-                    <span>{dept.count} invoices</span>
-                    <span>{money(dept.pending)} open</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState message="No invoice spend yet." />
-          )}
-        </section>
+      <div className="finance-dashboard-grid">
+        <ComparisonPanel
+          title="Month-to-month comparison"
+          eyebrow={`${data.currentMonth.label} vs ${data.previousMonth.label}`}
+          rows={data.monthlyComparison.slice(0, 8)}
+          currentLabel={data.currentMonth.label}
+          previousLabel={data.previousMonth.label}
+        />
+        <ComparisonPanel
+          title="Quarter-to-quarter comparison"
+          eyebrow={`${data.currentQuarter.label} vs ${data.previousQuarter.label}`}
+          rows={data.quarterlyComparison.slice(0, 8)}
+          currentLabel={data.currentQuarter.label}
+          previousLabel={data.previousQuarter.label}
+        />
+      </div>
 
-        <section className="dashboard-panel">
+      <div className="finance-dashboard-grid finance-dashboard-grid-secondary">
+        <section className="dashboard-panel finance-split-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Workflow</p>
-              <h3>Status pipeline</h3>
+              <p className="eyebrow">OPEX and CAPEX</p>
+              <h3>Expense classification</h3>
             </div>
           </div>
-          <div className="status-stack">
-            {dashboard.statusTotals.map((item) => (
-              <div className="status-row" key={item.key}>
-                <span className={`status-dot tone-${item.tone}`} />
-                <span>{item.label}</span>
-                <div className="mini-track" aria-hidden="true">
-                  <span
-                    className={`mini-fill tone-${item.tone}`}
-                    style={{ width: `${Math.max(2, (item.count / largestStatus) * 100)}%` }}
-                  />
+          <div className="split-bar" aria-label="OPEX and CAPEX split">
+            <span className="split-opex" style={{ width: `${opexShare}%` }} />
+            <span className="split-capex" style={{ width: `${capexShare}%` }} />
+          </div>
+          <div className="split-legend">
+            {data.opexCapex.map((item) => (
+              <div key={item.key} className="split-card">
+                <span className={`classification-dot ${item.key.toLowerCase()}`} />
+                <div>
+                  <strong>{item.label}</strong>
+                  <small>
+                    {money(item.currentAmount)} / {signedMoney(item.varianceAmount)} (
+                    {percent(item.variancePercent)})
+                  </small>
                 </div>
-                <strong>{item.count}</strong>
               </div>
             ))}
           </div>
         </section>
-      </div>
-
-      <div className="dashboard-grid dashboard-grid-secondary">
-        <section className="dashboard-panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Queue</p>
-              <h3>
-                {user.role === 'DEPT_ADMIN'
-                  ? 'Department queue'
-                  : user.role === 'DEPT_USER'
-                    ? 'Department actions'
-                    : 'AP actions'}
-              </h3>
-            </div>
-          </div>
-          {actionInvoices.length ? (
-            <div className="queue-list">
-              {actionInvoices.map((invoice) => (
-                <Link className="queue-item" to={`/invoices/${invoice.id}`} key={invoice.id}>
-                  <span>
-                    <strong>{invoice.reference || invoice.vendor?.displayName || 'Invoice'}</strong>
-                    <small>{invoice.department.name}</small>
-                  </span>
-                  <span className={`badge badge-${statusTone(invoice.status)}`}>
-                    {statusLabel(invoice.status)}
-                  </span>
-                  <strong>{money(amountOf(invoice))}</strong>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <EmptyState message="Nothing needs attention right now." />
-          )}
-        </section>
 
         <section className="dashboard-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Latest</p>
-              <h3>Recent invoices</h3>
+              <p className="eyebrow">Variance reasoning</p>
+              <h3>AI-ready finance insights</h3>
             </div>
           </div>
-          {recentInvoices.length ? (
-            <div className="recent-list">
-              {recentInvoices.map((invoice) => (
-                <Link className="recent-row" to={`/invoices/${invoice.id}`} key={invoice.id}>
-                  <span>
-                    <strong>{invoice.reference || invoice.description || 'Untitled invoice'}</strong>
-                    <small>
-                      {invoice.vendor?.displayName ?? 'Vendor pending'} · {formatDate(invoice.createdAt)}
-                    </small>
-                  </span>
-                  <span>{money(amountOf(invoice))}</span>
-                </Link>
+          {data.insights.length ? (
+            <div className="insight-list">
+              {data.insights.map((insight) => (
+                <article className={`insight-card insight-${insight.severity}`} key={insight.title}>
+                  <strong>{insight.title}</strong>
+                  <p>{insight.body}</p>
+                </article>
               ))}
             </div>
           ) : (
-            <EmptyState message="No invoices have been uploaded yet." />
+            <EmptyState message="No major variance insight yet." />
           )}
         </section>
       </div>
+
+      <section className="dashboard-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Hierarchical drill-down</p>
+            <h3>Expense tree by category, head, and ticket</h3>
+          </div>
+        </div>
+        {data.expenseTree.length ? (
+          <div className="expense-tree">
+            {data.expenseTree.map((node) => (
+              <ExpenseTreeNodeView key={node.id} node={node} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState message="No expense tree data available for the selected periods." />
+        )}
+      </section>
     </div>
+  );
+}
+
+function PeriodSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: PeriodOption[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="period-field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option value={option.key} key={option.key}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -384,6 +470,131 @@ function MetricCard({
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
+  );
+}
+
+function ComparisonPanel({
+  title,
+  eyebrow,
+  rows,
+  currentLabel,
+  previousLabel,
+}: {
+  title: string;
+  eyebrow: string;
+  rows: FinanceVarianceRow[];
+  currentLabel: string;
+  previousLabel: string;
+}) {
+  const maxAmount = Math.max(
+    1,
+    ...rows.flatMap((row) => [row.currentAmount, row.previousAmount]),
+  );
+
+  return (
+    <section className="dashboard-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h3>{title}</h3>
+        </div>
+      </div>
+      {rows.length ? (
+        <div className="variance-list">
+          {rows.map((row) => (
+            <article className="variance-row" key={`${title}-${row.key}`}>
+              <div className="variance-row-main">
+                <span>
+                  <strong>{row.label}</strong>
+                  <small>{row.classification ?? 'Expense head'}</small>
+                </span>
+                <span className={`variance-pill ${trendClass(row.trend)}`}>
+                  {signedMoney(row.varianceAmount)} / {percent(row.variancePercent)}
+                </span>
+              </div>
+              <div className="variance-bars" aria-hidden="true">
+                <span
+                  className="variance-current"
+                  style={{ width: `${Math.max(3, (row.currentAmount / maxAmount) * 100)}%` }}
+                />
+                <span
+                  className="variance-previous"
+                  style={{ width: `${Math.max(3, (row.previousAmount / maxAmount) * 100)}%` }}
+                />
+              </div>
+              <div className="variance-meta">
+                <span>
+                  {currentLabel}: <strong>{compactMoney(row.currentAmount)}</strong>
+                </span>
+                <span>
+                  {previousLabel}: <strong>{compactMoney(row.previousAmount)}</strong>
+                </span>
+              </div>
+              <DriverStrip drivers={row.drivers} />
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState message="No comparison data for this period yet." />
+      )}
+    </section>
+  );
+}
+
+function DriverStrip({ drivers }: { drivers: FinanceDriver[] }) {
+  if (!drivers.length) return null;
+  return (
+    <div className="driver-strip">
+      {drivers.map((driver) => (
+        <Link to={`/tickets/${driver.id}`} key={driver.id}>
+          <strong>{driver.department}</strong>
+          <span>
+            {driver.vendor} / {compactMoney(driver.amount)}
+          </span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function ExpenseTreeNodeView({ node }: { node: FinanceTreeNode }) {
+  const ticketId = node.level === 'item' && node.id.startsWith('item-') ? node.id.slice(5) : null;
+  const content = (
+    <>
+      <span className="tree-node-title">
+        <strong>{node.label}</strong>
+        <small>{node.classification ?? node.level}</small>
+      </span>
+      <span className="tree-node-values">
+        <strong>{money(node.currentAmount)}</strong>
+        <small className={trendClass(node.trend)}>
+          {signedMoney(node.varianceAmount)} / {percent(node.variancePercent)}
+        </small>
+      </span>
+    </>
+  );
+
+  if (node.level === 'item') {
+    return ticketId ? (
+      <Link className="tree-node tree-node-item" to={`/tickets/${ticketId}`}>
+        {content}
+      </Link>
+    ) : (
+      <div className="tree-node tree-node-item">{content}</div>
+    );
+  }
+
+  return (
+    <details className={`tree-node tree-node-${node.level}`} open={node.level === 'classification'}>
+      <summary>{content}</summary>
+      {node.children.length ? (
+        <div className="tree-children">
+          {node.children.map((child) => (
+            <ExpenseTreeNodeView key={child.id} node={child} />
+          ))}
+        </div>
+      ) : null}
+    </details>
   );
 }
 

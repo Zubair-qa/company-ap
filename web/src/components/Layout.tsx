@@ -1,12 +1,18 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 
+type NavItem = {
+  to: string;
+  label: string;
+  roles?: string[];
+};
+
 const navItems = [
-  { to: '/', label: 'Payment board', index: '01' },
-  { to: '/dashboard', label: 'Reports dashboard', index: '02' },
-  { to: '/operations', label: 'Operations', index: '03' },
-  { to: '/invoices', label: 'Invoices', index: '04' },
-];
+  { to: '/', label: 'Payment board' },
+  { to: '/dashboard', label: 'Reports dashboard', roles: ['AP_CLERK', 'CFO'] },
+  { to: '/operations', label: 'Operations' },
+  { to: '/invoices', label: 'Invoices', roles: ['DEPT_USER'] },
+] satisfies NavItem[];
 
 function displayName(name: string | undefined) {
   return name === 'AP Clerk' ? 'AP Finance' : name ?? '';
@@ -22,7 +28,10 @@ export function Layout() {
   const userName = displayName(user?.name);
   const roleLabel = displayRole(user?.role);
   const departmentLabel = user?.departmentId ? 'Department scoped' : 'Company wide';
-  const visibleNav = user?.role === 'DEPT_ADMIN' ? navItems.slice(0, 1) : navItems;
+  const visibleNav =
+    user?.role === 'DEPT_ADMIN'
+      ? navItems.slice(0, 1)
+      : navItems.filter((item) => !item.roles || (user && item.roles.includes(user.role)));
 
   return (
     <div className="app-shell">
@@ -39,9 +48,9 @@ export function Layout() {
           <>
             <div className="nav-group-title">Workspace</div>
             <nav className="side-nav" aria-label="Primary">
-              {visibleNav.map((item) => (
+              {visibleNav.map((item, index) => (
                 <NavLink key={item.to} to={item.to} end={item.to === '/'} className="nav-btn">
-                  <span className="nav-index">{item.index}</span>
+                  <span className="nav-index">{String(index + 1).padStart(2, '0')}</span>
                   <span>{item.label}</span>
                 </NavLink>
               ))}

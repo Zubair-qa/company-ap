@@ -10,6 +10,7 @@ import {
   BillType,
   DocumentType,
   DocumentStatus,
+  ExpenseNature,
   FilerStatus,
   InvoiceStatus,
   PaymentMilestoneKind,
@@ -452,9 +453,223 @@ type WorkflowAgentResult = {
   ticket: unknown;
 };
 
+type FinanceClassification = 'OPEX' | 'CAPEX';
+type FinanceTrend = 'increase' | 'decrease' | 'flat';
+type FinanceTreeLevel = 'classification' | 'group' | 'head' | 'item';
+
+type FinanceDriver = {
+  id: string;
+  title: string;
+  department: string;
+  vendor: string;
+  amount: number;
+  status: TicketStatus;
+  statusLabel: string;
+};
+
+type FinanceVarianceRow = {
+  key: string;
+  label: string;
+  classification?: FinanceClassification;
+  currentAmount: number;
+  previousAmount: number;
+  varianceAmount: number;
+  variancePercent: number;
+  trend: FinanceTrend;
+  drivers: FinanceDriver[];
+};
+
+type FinanceTreeNode = {
+  id: string;
+  label: string;
+  level: FinanceTreeLevel;
+  classification?: FinanceClassification;
+  currentAmount: number;
+  previousAmount: number;
+  varianceAmount: number;
+  variancePercent: number;
+  trend: FinanceTrend;
+  children: FinanceTreeNode[];
+};
+
+type FinanceDashboardRow = {
+  id: string;
+  title: string;
+  department: string;
+  vendor: string;
+  head: string;
+  group: string;
+  classification: FinanceClassification;
+  amount: number;
+  status: TicketStatus;
+  date: Date;
+  monthKey: string;
+  monthLabel: string;
+  quarterKey: string;
+  quarterLabel: string;
+};
+
+type FinanceDashboardQuery = {
+  month?: string;
+  compareMonth?: string;
+  quarter?: string;
+  compareQuarter?: string;
+};
+
+type PeriodOption = {
+  key: string;
+  label: string;
+};
+
 type TicketAttachment = Prisma.SupportingDocumentGetPayload<{
   include: typeof attachmentInclude;
 }>;
+
+const monthFormatter = new Intl.DateTimeFormat('en-PK', {
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function decimalNumber(value: Prisma.Decimal | null | undefined) {
+  if (value == null) return 0;
+  const amount = Number(value.toString());
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function financeAmount(
+  netPayablePkr: Prisma.Decimal | null | undefined,
+  amountPkr: Prisma.Decimal | null | undefined,
+) {
+  const net = decimalNumber(netPayablePkr);
+  return net > 0 ? net : decimalNumber(amountPkr);
+}
+
+function monthStart(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function shiftMonth(date: Date, offset: number) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + offset, 1));
+}
+
+function quarterStart(date: Date) {
+  const quarterMonth = Math.floor(date.getUTCMonth() / 3) * 3;
+  return new Date(Date.UTC(date.getUTCFullYear(), quarterMonth, 1));
+}
+
+function shiftQuarter(date: Date, offset: number) {
+  const start = quarterStart(date);
+  return new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + offset * 3, 1));
+}
+
+function monthKey(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabel(date: Date) {
+  return monthFormatter.format(monthStart(date));
+}
+
+function parseMonthStart(value: string | undefined, fieldName: string) {
+  if (!value) return null;
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(value);
+  if (!match) {
+    throw new BadRequestException(`${fieldName} must use YYYY-MM format`);
+  }
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+}
+
+function quarterKey(date: Date) {
+  const quarter = Math.floor(date.getUTCMonth() / 3) + 1;
+  return `${date.getUTCFullYear()}-Q${quarter}`;
+}
+
+function quarterLabel(date: Date) {
+  const quarter = Math.floor(date.getUTCMonth() / 3) + 1;
+  return `Q${quarter} ${date.getUTCFullYear()}`;
+}
+
+function parseQuarterStart(value: string | undefined, fieldName: string) {
+  if (!value) return null;
+  const match = /^(\d{4})-Q([1-4])$/.exec(value);
+  if (!match) {
+    throw new BadRequestException(`${fieldName} must use YYYY-Q1 format`);
+  }
+  const month = (Number(match[2]) - 1) * 3;
+  return new Date(Date.UTC(Number(match[1]), month, 1));
+}
+
+function ensurePeriodOption(options: PeriodOption[], option: PeriodOption) {
+  if (!options.some((item) => item.key === option.key)) {
+    options.push(option);
+  }
+  return options;
+}
+
+function variancePercent(currentAmount: number, previousAmount: number) {
+  if (previousAmount === 0 && currentAmount === 0) return 0;
+  if (previousAmount === 0) return 100;
+  return roundMoney(((currentAmount - previousAmount) / previousAmount) * 100);
+}
+
+function trendFor(varianceAmount: number): FinanceTrend {
+  if (Math.abs(varianceAmount) < 0.01) return 'flat';
+  return varianceAmount > 0 ? 'increase' : 'decrease';
+}
+
+function expenseNatureLabel(nature: ExpenseNature) {
+  const labels: Record<ExpenseNature, string> = {
+    [ExpenseNature.REPAIR_MAINTENANCE]: 'Repair and maintenance',
+    [ExpenseNature.UTILITIES]: 'Utilities',
+    [ExpenseNature.OFFICE_SUPPLIES]: 'Office supplies',
+    [ExpenseNature.PROFESSIONAL_SERVICES]: 'Professional services',
+    [ExpenseNature.SOFTWARE_CLOUD]: 'Software and cloud',
+    [ExpenseNature.TRAVEL]: 'Travel',
+    [ExpenseNature.CAPEX]: 'Capital purchases',
+    [ExpenseNature.OTHER]: 'Other expenses',
+  };
+  return labels[nature];
+}
+
+function expenseClassification(nature: ExpenseNature): FinanceClassification {
+  return nature === ExpenseNature.CAPEX ? 'CAPEX' : 'OPEX';
+}
+
+function expenseGroup(nature: ExpenseNature) {
+  if (nature === ExpenseNature.CAPEX) return 'Capital expenditure';
+  if (
+    nature === ExpenseNature.REPAIR_MAINTENANCE ||
+    nature === ExpenseNature.UTILITIES ||
+    nature === ExpenseNature.OFFICE_SUPPLIES
+  ) {
+    return 'Office operations';
+  }
+  if (
+    nature === ExpenseNature.PROFESSIONAL_SERVICES ||
+    nature === ExpenseNature.SOFTWARE_CLOUD
+  ) {
+    return 'Professional and technology';
+  }
+  if (nature === ExpenseNature.TRAVEL) return 'Travel and mobility';
+  return 'Other operating spend';
+}
+
+function makeFinanceDriver(row: FinanceDashboardRow): FinanceDriver {
+  return {
+    id: row.id,
+    title: row.title,
+    department: row.department,
+    vendor: row.vendor,
+    amount: row.amount,
+    status: row.status,
+    statusLabel: TICKET_STATUS_LABELS[row.status],
+  };
+}
 
 function toKarachiShifted(date: Date) {
   return new Date(date.getTime() + KARACHI_OFFSET_MS);
@@ -564,6 +779,410 @@ export class TicketsService {
       ],
     });
     return tickets.map((ticket) => this.decorateTicket(ticket, user));
+  }
+
+  async financeDashboard(
+    user: RequestUser,
+    query: FinanceDashboardQuery = {},
+  ): Promise<unknown> {
+    if (user.role !== Role.AP_CLERK && user.role !== Role.CFO) {
+      throw new ForbiddenException('Finance dashboard is available only to AP Finance and CFO');
+    }
+
+    const tickets = await this.prisma.paymentTicket.findMany({
+      include: {
+        department: { select: { name: true } },
+        vendor: { select: { displayName: true } },
+        invoice: {
+          select: {
+            invoiceNumber: true,
+            reference: true,
+            description: true,
+            originalFilename: true,
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+
+    const rows: FinanceDashboardRow[] = tickets.map((ticket) => {
+      const effectiveDate =
+        ticket.bankExecutedAt ?? ticket.submittedToFinanceAt ?? ticket.createdAt;
+      const title =
+        ticket.title ||
+        ticket.invoice?.reference ||
+        ticket.invoice?.invoiceNumber ||
+        ticket.invoice?.description ||
+        ticket.invoice?.originalFilename ||
+        'AP ticket';
+      const head = expenseNatureLabel(ticket.expenseNature);
+      const classification = expenseClassification(ticket.expenseNature);
+
+      return {
+        id: ticket.id,
+        title,
+        department: ticket.department.name,
+        vendor: ticket.vendor?.displayName ?? ticket.vendorNameSnapshot ?? 'Vendor pending',
+        head,
+        group: expenseGroup(ticket.expenseNature),
+        classification,
+        amount: financeAmount(ticket.netPayablePkr, ticket.amountPkr),
+        status: ticket.status,
+        date: effectiveDate,
+        monthKey: monthKey(effectiveDate),
+        monthLabel: monthLabel(effectiveDate),
+        quarterKey: quarterKey(effectiveDate),
+        quarterLabel: quarterLabel(effectiveDate),
+      };
+    });
+
+    const now = new Date();
+    const currentMonthDate =
+      parseMonthStart(query.month, 'month') ?? monthStart(now);
+    const previousMonthDate =
+      parseMonthStart(query.compareMonth, 'compareMonth') ??
+      shiftMonth(currentMonthDate, -1);
+    const currentQuarterDate =
+      parseQuarterStart(query.quarter, 'quarter') ?? quarterStart(now);
+    const previousQuarterDate =
+      parseQuarterStart(query.compareQuarter, 'compareQuarter') ??
+      shiftQuarter(currentQuarterDate, -1);
+    const currentMonthKey = monthKey(currentMonthDate);
+    const previousMonthKey = monthKey(previousMonthDate);
+    const currentQuarterKey = quarterKey(currentQuarterDate);
+    const previousQuarterKey = quarterKey(previousQuarterDate);
+    const availableMonths = Array.from(
+      rows
+        .reduce((map, row) => {
+          map.set(row.monthKey, { key: row.monthKey, label: row.monthLabel });
+          return map;
+        }, new Map<string, PeriodOption>())
+        .values(),
+    );
+    ensurePeriodOption(availableMonths, {
+      key: currentMonthKey,
+      label: monthLabel(currentMonthDate),
+    });
+    ensurePeriodOption(availableMonths, {
+      key: previousMonthKey,
+      label: monthLabel(previousMonthDate),
+    });
+    availableMonths.sort((a, b) => b.key.localeCompare(a.key));
+
+    const availableQuarters = Array.from(
+      rows
+        .reduce((map, row) => {
+          map.set(row.quarterKey, { key: row.quarterKey, label: row.quarterLabel });
+          return map;
+        }, new Map<string, PeriodOption>())
+        .values(),
+    );
+    ensurePeriodOption(availableQuarters, {
+      key: currentQuarterKey,
+      label: quarterLabel(currentQuarterDate),
+    });
+    ensurePeriodOption(availableQuarters, {
+      key: previousQuarterKey,
+      label: quarterLabel(previousQuarterDate),
+    });
+    availableQuarters.sort((a, b) => b.key.localeCompare(a.key));
+
+    const sumRows = (items: FinanceDashboardRow[]) =>
+      roundMoney(items.reduce((sum, row) => sum + row.amount, 0));
+    const sumPeriod = (
+      periodKey: string,
+      periodFor: (row: FinanceDashboardRow) => string,
+      filter?: (row: FinanceDashboardRow) => boolean,
+    ) => sumRows(rows.filter((row) => periodFor(row) === periodKey && (!filter || filter(row))));
+    const periodComparison = (
+      key: string,
+      label: string,
+      periodFor: (row: FinanceDashboardRow) => string,
+      currentPeriodKey: string,
+      previousPeriodKey: string,
+      classification?: FinanceClassification,
+    ): FinanceVarianceRow => {
+      const filter = (row: FinanceDashboardRow) =>
+        classification
+          ? row.classification === classification && (row.head === key || row.classification === key)
+          : row.head === key;
+      const currentRows = rows.filter(
+        (row) => periodFor(row) === currentPeriodKey && filter(row),
+      );
+      const previousRows = rows.filter(
+        (row) => periodFor(row) === previousPeriodKey && filter(row),
+      );
+      const currentAmount = sumRows(currentRows);
+      const previousAmount = sumRows(previousRows);
+      const varianceAmount = roundMoney(currentAmount - previousAmount);
+      const driverRows = (currentRows.length ? currentRows : previousRows)
+        .slice()
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 3);
+
+      return {
+        key,
+        label,
+        classification,
+        currentAmount,
+        previousAmount,
+        varianceAmount,
+        variancePercent: variancePercent(currentAmount, previousAmount),
+        trend: trendFor(varianceAmount),
+        drivers: driverRows.map(makeFinanceDriver),
+      };
+    };
+
+    const heads = Array.from(new Set(rows.map((row) => row.head))).sort();
+    const monthlyComparison = heads
+      .map((head) =>
+        periodComparison(
+          head,
+          head,
+          (row) => row.monthKey,
+          currentMonthKey,
+          previousMonthKey,
+          rows.find((row) => row.head === head)?.classification,
+        ),
+      )
+      .filter((row) => row.currentAmount > 0 || row.previousAmount > 0)
+      .sort((a, b) => Math.abs(b.varianceAmount) - Math.abs(a.varianceAmount));
+    const quarterlyComparison = heads
+      .map((head) =>
+        periodComparison(
+          head,
+          head,
+          (row) => row.quarterKey,
+          currentQuarterKey,
+          previousQuarterKey,
+          rows.find((row) => row.head === head)?.classification,
+        ),
+      )
+      .filter((row) => row.currentAmount > 0 || row.previousAmount > 0)
+      .sort((a, b) => Math.abs(b.varianceAmount) - Math.abs(a.varianceAmount));
+
+    const classificationRows: FinanceVarianceRow[] = (['OPEX', 'CAPEX'] as const).map(
+      (classification) => {
+        const currentAmount = sumPeriod(
+          currentMonthKey,
+          (row) => row.monthKey,
+          (row) => row.classification === classification,
+        );
+        const previousAmount = sumPeriod(
+          previousMonthKey,
+          (row) => row.monthKey,
+          (row) => row.classification === classification,
+        );
+        const varianceAmount = roundMoney(currentAmount - previousAmount);
+        const drivers = rows
+          .filter(
+            (row) =>
+              row.monthKey === currentMonthKey && row.classification === classification,
+          )
+          .sort((a, b) => b.amount - a.amount)
+          .slice(0, 3)
+          .map(makeFinanceDriver);
+
+        return {
+          key: classification,
+          label: classification,
+          classification,
+          currentAmount,
+          previousAmount,
+          varianceAmount,
+          variancePercent: variancePercent(currentAmount, previousAmount),
+          trend: trendFor(varianceAmount),
+          drivers,
+        };
+      },
+    );
+
+    const buildNode = (
+      id: string,
+      label: string,
+      level: FinanceTreeLevel,
+      nodeRows: FinanceDashboardRow[],
+      children: FinanceTreeNode[],
+      classification?: FinanceClassification,
+    ): FinanceTreeNode => {
+      const currentAmount = sumRows(nodeRows.filter((row) => row.monthKey === currentMonthKey));
+      const previousAmount = sumRows(nodeRows.filter((row) => row.monthKey === previousMonthKey));
+      const varianceAmount = roundMoney(currentAmount - previousAmount);
+      return {
+        id,
+        label,
+        level,
+        classification,
+        currentAmount,
+        previousAmount,
+        varianceAmount,
+        variancePercent: variancePercent(currentAmount, previousAmount),
+        trend: trendFor(varianceAmount),
+        children,
+      };
+    };
+
+    const currentAndPreviousRows = rows.filter(
+      (row) => row.monthKey === currentMonthKey || row.monthKey === previousMonthKey,
+    );
+    const expenseTree = (['OPEX', 'CAPEX'] as const)
+      .map((classification) => {
+        const classificationRowsForTree = currentAndPreviousRows.filter(
+          (row) => row.classification === classification,
+        );
+        const groups = Array.from(
+          new Set(classificationRowsForTree.map((row) => row.group)),
+        ).sort();
+        const groupChildren = groups.map((group) => {
+          const groupRows = classificationRowsForTree.filter((row) => row.group === group);
+          const headsForGroup = Array.from(new Set(groupRows.map((row) => row.head))).sort();
+          const headChildren = headsForGroup.map((head) => {
+            const headRows = groupRows.filter((row) => row.head === head);
+            const itemChildren = headRows
+              .slice()
+              .sort((a, b) => b.amount - a.amount)
+              .slice(0, 12)
+              .map((row) =>
+                buildNode(
+                  `item-${row.id}`,
+                  `${row.title} / ${row.department}`,
+                  'item',
+                  [row],
+                  [],
+                  row.classification,
+                ),
+              );
+            return buildNode(
+              `${classification}-${group}-${head}`,
+              head,
+              'head',
+              headRows,
+              itemChildren,
+              classification,
+            );
+          });
+          return buildNode(
+            `${classification}-${group}`,
+            group,
+            'group',
+            groupRows,
+            headChildren,
+            classification,
+          );
+        });
+        return buildNode(
+          classification,
+          classification,
+          'classification',
+          classificationRowsForTree,
+          groupChildren,
+          classification,
+        );
+      })
+      .filter((node) => node.currentAmount > 0 || node.previousAmount > 0);
+
+    const paidStatuses = new Set<TicketStatus>([
+      TicketStatus.BANK_EXECUTED,
+      TicketStatus.MARKED_PAID_IN_XERO,
+      TicketStatus.REQUESTER_NOTIFIED,
+      TicketStatus.PAYMENT_COMPLETE,
+    ]);
+    const currentMonthTotal = sumPeriod(currentMonthKey, (row) => row.monthKey);
+    const previousMonthTotal = sumPeriod(previousMonthKey, (row) => row.monthKey);
+    const totalVarianceAmount = roundMoney(currentMonthTotal - previousMonthTotal);
+    const openExposure = sumRows(rows.filter((row) => !paidStatuses.has(row.status)));
+    const paidAmount = sumRows(rows.filter((row) => paidStatuses.has(row.status)));
+    const increases = monthlyComparison
+      .filter((row) => row.varianceAmount > 0)
+      .slice()
+      .sort((a, b) => b.varianceAmount - a.varianceAmount)
+      .slice(0, 5);
+    const decreases = monthlyComparison
+      .filter((row) => row.varianceAmount < 0)
+      .slice()
+      .sort((a, b) => a.varianceAmount - b.varianceAmount)
+      .slice(0, 5);
+    const topIncrease = increases[0];
+    const topDecrease = decreases[0];
+    const insights = [
+      topIncrease
+        ? {
+            title: `${topIncrease.label} increased`,
+            severity: 'warning',
+            body: `${topIncrease.label} increased by PKR ${Math.round(
+              topIncrease.varianceAmount,
+            ).toLocaleString('en-PK')} (${topIncrease.variancePercent}%). Main driver: ${
+              topIncrease.drivers[0]?.department ?? 'no department'
+            } / ${topIncrease.drivers[0]?.vendor ?? 'vendor pending'}.`,
+          }
+        : null,
+      topDecrease
+        ? {
+            title: `${topDecrease.label} decreased`,
+            severity: 'success',
+            body: `${topDecrease.label} decreased by PKR ${Math.round(
+              Math.abs(topDecrease.varianceAmount),
+            ).toLocaleString('en-PK')} (${Math.abs(topDecrease.variancePercent)}%). This reduces current month exposure against the previous period.`,
+          }
+        : null,
+      {
+        title: 'Open AP exposure',
+        severity: openExposure > paidAmount ? 'warning' : 'info',
+        body: `Open tickets currently represent PKR ${Math.round(openExposure).toLocaleString(
+          'en-PK',
+        )}; paid or executed tickets represent PKR ${Math.round(paidAmount).toLocaleString(
+          'en-PK',
+        )}.`,
+      },
+    ].filter(
+      (
+        insight,
+      ): insight is {
+        title: string;
+        severity: string;
+        body: string;
+      } => insight !== null,
+    );
+
+    return {
+      generatedAt: new Date().toISOString(),
+      currentMonth: {
+        key: currentMonthKey,
+        label: monthLabel(currentMonthDate),
+      },
+      previousMonth: {
+        key: previousMonthKey,
+        label: monthLabel(previousMonthDate),
+      },
+      currentQuarter: {
+        key: currentQuarterKey,
+        label: quarterLabel(currentQuarterDate),
+      },
+      previousQuarter: {
+        key: previousQuarterKey,
+        label: quarterLabel(previousQuarterDate),
+      },
+      availableMonths,
+      availableQuarters,
+      summary: {
+        totalSpend: currentMonthTotal,
+        previousSpend: previousMonthTotal,
+        varianceAmount: totalVarianceAmount,
+        variancePercent: variancePercent(currentMonthTotal, previousMonthTotal),
+        opex: classificationRows.find((row) => row.key === 'OPEX')?.currentAmount ?? 0,
+        capex: classificationRows.find((row) => row.key === 'CAPEX')?.currentAmount ?? 0,
+        openExposure,
+        paidAmount,
+        ticketCount: rows.length,
+        currentMonthTicketCount: rows.filter((row) => row.monthKey === currentMonthKey).length,
+      },
+      opexCapex: classificationRows,
+      monthlyComparison,
+      quarterlyComparison,
+      expenseTree,
+      topMovers: { increases, decreases },
+      insights,
+    };
   }
 
   async getOne(id: string, user: RequestUser) {

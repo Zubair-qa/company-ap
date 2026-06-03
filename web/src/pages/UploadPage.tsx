@@ -25,11 +25,12 @@ export function UploadPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const canCreateInvoice = user?.role === 'DEPT_USER' || user?.role === 'COMPANY_ADMIN';
+  const canCreateInvoice = user?.role === 'DEPT_USER';
   const isDepartmentUser = user?.role === 'DEPT_USER';
 
   const { data: departments } = useQuery({
     queryKey: ['departments'],
+    enabled: canCreateInvoice,
     queryFn: async () => {
       const { data } = await api.get<Dept[]>('/api/departments');
       return data;

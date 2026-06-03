@@ -36,6 +36,7 @@ enum InvoiceStatus {
 
 enum TicketStatus {
   NEW_REQUEST
+  ADVANCE_PAID_REMAINING_PENDING
   DEPARTMENT_HEAD_APPROVAL
   DOCS_REVIEW
   MISSING_DOCS
@@ -223,6 +224,38 @@ enum NotificationType {
   XERO_SYNC_FAILED
 }
 
+enum PaymentPlanType {
+  FULL_PAYMENT
+  ADVANCE_REMAINING
+  MILESTONE
+}
+
+enum PaymentPlanStatus {
+  DRAFT
+  ACTIVE
+  ADVANCE_PAID
+  WAITING_FOR_REMAINING_DOCS
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMilestoneKind {
+  FULL
+  ADVANCE
+  REMAINING
+  FINAL
+  CUSTOM
+}
+
+enum PaymentMilestoneStatus {
+  DRAFT
+  READY_FOR_FINANCE
+  IN_FINANCE
+  PAID
+  BLOCKED
+  CANCELLED
+}
+
 model Department {
   id             String    @id @default(uuid())
   code           String?   @unique
@@ -234,6 +267,7 @@ model Department {
   invoices       Invoice[]
   tickets        PaymentTicket[]
   purchaseOrders PurchaseOrder[]
+  paymentPlans   PaymentPlan[]
   assignedQueries InterdepartmentalQuery[] @relation("QueryAssignedDepartment")
   approvalMatrix ApprovalMatrix[]
 }
@@ -264,6 +298,7 @@ model User {
   initiatedPayments PaymentRecord[] @relation("PaymentInitiatedBy")
   authorizedPayments PaymentRecord[] @relation("PaymentAuthorizedBy")
   reconciliations Reconciliation[]
+  createdPaymentPlans PaymentPlan[] @relation("PaymentPlanCreatedBy")
   auditLogs AuditLog[]
   notifications Notification[]
   createdAt      DateTime     @default(now())
@@ -297,6 +332,7 @@ model Vendor {
   invoices           Invoice[]
   tickets            PaymentTicket[]
   purchaseOrders     PurchaseOrder[]
+  paymentPlans       PaymentPlan[]
   paymentRecords     PaymentRecord[]
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
@@ -336,6 +372,7 @@ model Invoice {
   stripeCheckoutSessionId String?
   stripePaymentIntentId   String?
   ticket             PaymentTicket?
+  paymentPlan        PaymentPlan?
   lineItems          InvoiceLineItem[]
   supportingDocuments SupportingDocument[]
   verifications      Verification[]
@@ -385,6 +422,7 @@ model PurchaseOrder {
   updatedAt            DateTime            @updatedAt
   lineItems            PoLineItem[]
   invoices             Invoice[]
+  paymentPlans         PaymentPlan[]
   supportingDocuments  SupportingDocument[]
 
   @@index([departmentId])
@@ -408,6 +446,63 @@ model PoLineItem {
   invoiceLineItems InvoiceLineItem[]
 
   @@unique([poId, lineNo])
+}
+
+model PaymentPlan {
+  id                     String             @id @default(uuid())
+  planNumber             String             @unique
+  planType               PaymentPlanType    @default(FULL_PAYMENT)
+  status                 PaymentPlanStatus  @default(DRAFT)
+  invoiceId              String?            @unique
+  invoice                Invoice?           @relation(fields: [invoiceId], references: [id])
+  purchaseOrderId        String?
+  purchaseOrder          PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id])
+  departmentId           String
+  department             Department         @relation(fields: [departmentId], references: [id])
+  vendorId               String?
+  vendor                 Vendor?            @relation(fields: [vendorId], references: [id])
+  createdById            String?
+  createdBy              User?              @relation("PaymentPlanCreatedBy", fields: [createdById], references: [id])
+  totalAmount            Decimal            @default(0) @db.Decimal(18, 2)
+  paidAmount             Decimal            @default(0) @db.Decimal(18, 2)
+  remainingAmount        Decimal            @default(0) @db.Decimal(18, 2)
+  advancePercent         Decimal?           @db.Decimal(5, 2)
+  releaseCondition       String?
+  requiredFinalDocuments String[]           @default([])
+  aiVerificationStatus   VerificationStatus @default(PENDING)
+  aiVerificationScore    Int                @default(0)
+  aiVerificationNotes    String?
+  milestones             PaymentMilestone[]
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  @@index([status])
+  @@index([departmentId])
+  @@index([vendorId])
+}
+
+model PaymentMilestone {
+  id                String                 @id @default(uuid())
+  paymentPlanId     String
+  paymentPlan       PaymentPlan            @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+  sequence          Int
+  label             String
+  kind              PaymentMilestoneKind
+  status            PaymentMilestoneStatus @default(DRAFT)
+  amount            Decimal                @db.Decimal(18, 2)
+  percent           Decimal?               @db.Decimal(5, 2)
+  releaseCondition  String?
+  requiredDocuments String[]               @default([])
+  ticketId          String?                @unique
+  ticket            PaymentTicket?         @relation(fields: [ticketId], references: [id])
+  releasedAt        DateTime?
+  paidAt            DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@unique([paymentPlanId, sequence])
+  @@index([status])
+  @@index([kind])
 }
 
 model InvoiceLineItem {
@@ -689,6 +784,7 @@ model PaymentTicket {
   parentTicketId            String?
   parentTicket              PaymentTicket?            @relation("PartialPayments", fields: [parentTicketId], references: [id])
   childTickets              PaymentTicket[]           @relation("PartialPayments")
+  paymentMilestone          PaymentMilestone?
   invoiceId                 String?                   @unique
   invoice                   Invoice?                  @relation(fields: [invoiceId], references: [id])
   notes                     String?

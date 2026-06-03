@@ -6,6 +6,16 @@ import type { Department } from '../api/client';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 
+const demoUsers = [
+  { label: 'AP', email: 'ap@demo.local' },
+  { label: 'Finance', email: 'finance-user@demo.local' },
+  { label: 'Engineering', email: 'eng-user@demo.local' },
+  { label: 'Eng admin', email: 'eng-admin@demo.local' },
+  { label: 'Finance admin', email: 'finance-admin@demo.local' },
+  { label: 'CFO', email: 'cfo@demo.local' },
+  { label: 'Admin', email: 'admin@demo.local' },
+];
+
 export function LoginPage() {
   const { user, login, loading } = useAuth();
   const [email, setEmail] = useState('ap@demo.local');
@@ -41,14 +51,52 @@ export function LoginPage() {
 
   return (
     <div className="auth-shell">
+      <section className="auth-intro">
+        <span className="journey-pill">Company AP automation</span>
+        <h1>Run invoice intake, AI checks, approvals, payments, and Xero close from one workspace.</h1>
+        <p>
+          Departments submit complete invoice packs, AI validates documents, AP finance
+          processes the ticket, CFO signs, and payment status is tracked until close.
+        </p>
+        <div className="auth-metrics">
+          <span>
+            <strong>1 day</strong>
+            <small>Target AP cycle</small>
+          </span>
+          <span>
+            <strong>AI</strong>
+            <small>Document checks</small>
+          </span>
+          <span>
+            <strong>RBAC</strong>
+            <small>Scoped access</small>
+          </span>
+        </div>
+      </section>
       <div className="auth-panel">
-      <h2 style={{ marginTop: 0 }}>Sign in</h2>
-      <p className="muted">
-        Demo users (password <code>changeme123</code>): <code>ap@demo.local</code>,{' '}
-        <code>finance-user@demo.local</code>, <code>eng-user@demo.local</code>,{' '}
-        <code>eng-admin@demo.local</code>, <code>finance-admin@demo.local</code>,{' '}
-        <code>cfo@demo.local</code>, <code>admin@demo.local</code>
-      </p>
+      <div className="auth-panel-header">
+        <span className="auth-logo-small">AP</span>
+        <div>
+          <h2>Sign in</h2>
+          <p>Choose the correct department with your role account.</p>
+        </div>
+      </div>
+      <details className="demo-box" aria-label="Demo users">
+        <summary>
+          <span>
+            <strong>Demo access</strong>
+            <small>Password: <code>changeme123</code></small>
+          </span>
+        </summary>
+        <div className="demo-grid">
+          {demoUsers.map((item) => (
+            <span key={item.email} className="demo-chip">
+              <small>{item.label}</small>
+              <code>{item.email}</code>
+            </span>
+          ))}
+        </div>
+      </details>
       <form onSubmit={onSubmit}>
         <div className="field">
           <label htmlFor="email">Email</label>

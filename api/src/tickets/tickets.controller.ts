@@ -111,6 +111,24 @@ export class TicketsController {
     return res.download(absolutePath, doc.fileName);
   }
 
+  @Get(':id/attachments/:attachmentId/preview')
+  async previewAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @Req() req: { user: RequestUser },
+    @Res() res: Response,
+  ) {
+    const { doc, absolutePath } = await this.tickets.attachmentDownload(
+      id,
+      attachmentId,
+      req.user,
+    );
+    const safeName = doc.fileName.replaceAll('"', '');
+    res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    return res.sendFile(absolutePath);
+  }
+
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -123,6 +141,11 @@ export class TicketsController {
   @Post(':id/submit-finance')
   submitToFinance(@Param('id') id: string, @Req() req: { user: RequestUser }) {
     return this.tickets.submitToFinance(id, req.user);
+  }
+
+  @Post(':id/agent-verify')
+  runWorkflowAgent(@Param('id') id: string, @Req() req: { user: RequestUser }) {
+    return this.tickets.runWorkflowAgent(id, req.user);
   }
 
   @Post(':id/test-bank-auto-close')

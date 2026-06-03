@@ -8,7 +8,7 @@ import { useAuth } from '../auth/AuthProvider';
 
 const roles = [
   { value: 'COMPANY_ADMIN', label: 'Company admin' },
-  { value: 'AP_CLERK', label: 'AP clerk' },
+  { value: 'AP_CLERK', label: 'AP Finance' },
   { value: 'DEPT_USER', label: 'Department user' },
   { value: 'DEPT_ADMIN', label: 'Department head' },
   { value: 'CFO', label: 'CFO' },
@@ -51,6 +51,28 @@ export function RegisterPage() {
 
   return (
     <div className="auth-shell">
+      <section className="auth-intro">
+        <span className="journey-pill">Department onboarding</span>
+        <h1>Register the right AP role and keep every request department-scoped.</h1>
+        <p>
+          New departments and finance users can join the same controlled workflow while
+          permissions keep invoice creation, review, payment, and reporting separated.
+        </p>
+        <div className="auth-metrics">
+          <span>
+            <strong>01</strong>
+            <small>Department intake</small>
+          </span>
+          <span>
+            <strong>02</strong>
+            <small>Finance control</small>
+          </span>
+          <span>
+            <strong>03</strong>
+            <small>CFO sign-off</small>
+          </span>
+        </div>
+      </section>
       <div className="auth-panel">
         <h2 style={{ marginTop: 0 }}>Register</h2>
         <form onSubmit={onSubmit}>

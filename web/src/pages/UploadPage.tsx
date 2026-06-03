@@ -7,6 +7,16 @@ import { useAuth } from '../auth/AuthProvider';
 
 type Dept = { id: string; name: string };
 
+function apiErrorMessage(error: unknown, fallback: string) {
+  const maybe = error as {
+    message?: string;
+    response?: { data?: { message?: string | string[]; error?: string } };
+  };
+  const message = maybe.response?.data?.message;
+  if (Array.isArray(message)) return message.join(', ');
+  return message ?? maybe.response?.data?.error ?? maybe.message ?? fallback;
+}
+
 export function UploadPage() {
   const { user } = useAuth();
   const nav = useNavigate();
@@ -43,8 +53,13 @@ export function UploadPage() {
       fd.append('departmentId', departmentId);
       const { data } = await api.post<{ id: string }>('/api/invoice-files/upload', fd);
       nav(`/invoices/${data.id}`);
-    } catch {
-      setError('Invoice could not be created. Check file size, department, and access scope.');
+    } catch (uploadError) {
+      setError(
+        apiErrorMessage(
+          uploadError,
+          'Invoice could not be created. Check file size, department, and access scope.',
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -57,8 +72,12 @@ export function UploadPage() {
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Invoice creation is department-owned</h2>
         <p className="muted">
-          Department users create invoices. Department heads only review and approve from their
-          board before finance receives the request.
+          Department users create invoices. Agent validation checks the synced invoice, PO,
+          payment plan, and supporting documents before AP receives the request.
+        </p>
+        <p className="muted">
+          Current session: {user?.name} / {user?.role.replaceAll('_', ' ')}. Log in as a
+          department requester to create a new invoice.
         </p>
         <Link to="/" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
           Back to AP board
@@ -72,7 +91,7 @@ export function UploadPage() {
       <h2 style={{ marginTop: 0 }}>Create invoice</h2>
       <p className="muted">
         Department users submit invoices here. The request first goes through synced PO creation,
-        agent checks, and department head approval before AP receives it.
+        payment-plan setup, and agent validation before AP receives it.
       </p>
       <div className="card">
         <form onSubmit={onSubmit}>

@@ -32,6 +32,20 @@ type Ticket = {
   whtFilerStatus: string;
   statusLabel?: string;
   availableTransitions?: string[];
+  paymentMilestone?: {
+    label: string;
+    kind: string;
+    status: string;
+    amount: string;
+    paymentPlan: {
+      planNumber: string;
+      planType: string;
+      status: string;
+      totalAmount: string;
+      paidAmount: string;
+      remainingAmount: string;
+    };
+  } | null;
 };
 
 type BoardColumn = {
@@ -57,7 +71,7 @@ type Notice = {
 
 const statusLabels: Record<string, string> = {
   NEW_REQUEST: 'New request',
-  DEPARTMENT_HEAD_APPROVAL: 'Department head approval',
+  ADVANCE_PAID_REMAINING_PENDING: 'Advance paid / remaining proof',
   DOCS_REVIEW: 'Docs review',
   MISSING_DOCS: 'Missing docs',
   REQUESTER_PINGED: 'Requester pinged',
@@ -96,6 +110,10 @@ const compactDate = new Intl.DateTimeFormat('en-PK', {
 
 function human(value: string) {
   return value.replaceAll('_', ' ').toLowerCase();
+}
+
+function displayPersonName(name: string | undefined | null) {
+  return name === 'AP Clerk' ? 'AP Finance' : name ?? 'Unassigned';
 }
 
 function money(value: string | number) {
@@ -183,7 +201,7 @@ export function TicketsBoardPage() {
           ticket.vendorNameSnapshot,
           ticket.invoiceNumber,
           ticket.internalReference,
-          ticket.assignedTo?.name,
+          displayPersonName(ticket.assignedTo?.name),
         ]
           .filter(Boolean)
           .join(' ')
@@ -204,8 +222,6 @@ export function TicketsBoardPage() {
           <p className="muted">
             {user.role === 'CFO'
               ? 'Open CFO sign pending tickets, verify the bank portal payment, then hand execution back to AP.'
-              : user.role === 'DEPT_ADMIN'
-                ? 'Review department requests waiting for head approval. Open a card to approve or reject with a reason.'
               : 'Track every request from department submission to Xero, bank portal, and completion.'}
           </p>
         </div>
@@ -260,9 +276,21 @@ export function TicketsBoardPage() {
                   <div className="ticket-card-grid">
                     <span>{money(ticket.amountPkr)}</span>
                     <span>{human(ticket.paymentMethod)}</span>
-                    <span>{ticket.assignedTo?.name ?? 'Unassigned'}</span>
+                    <span>{displayPersonName(ticket.assignedTo?.name)}</span>
                     <span>{human(ticket.expenseNature)}</span>
                   </div>
+                  {ticket.paymentMilestone ? (
+                    <div className="payment-plan-mini">
+                      <strong>{ticket.paymentMilestone.paymentPlan.planNumber}</strong>
+                      <span>
+                        {human(ticket.paymentMilestone.kind)} / {human(ticket.paymentMilestone.status)}
+                      </span>
+                      <small>
+                        Paid {money(ticket.paymentMilestone.paymentPlan.paidAmount)} / Remaining{' '}
+                        {money(ticket.paymentMilestone.paymentPlan.remainingAmount)}
+                      </small>
+                    </div>
+                  ) : null}
                   <div className="ticket-badges">
                     <span className="badge badge-slate">
                       {ticket.statusLabel ?? labelForStatus(ticket.status)}

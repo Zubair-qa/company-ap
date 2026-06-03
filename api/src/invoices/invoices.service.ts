@@ -12,12 +12,17 @@ import {
   DocumentStatus,
   ExpenseNature,
   InvoiceStatus,
+  PaymentMilestoneKind,
+  PaymentMilestoneStatus,
   PaymentMethod,
+  PaymentPlanStatus,
+  PaymentPlanType,
   Prisma,
   PurchaseOrderStatus,
   Role,
   TicketPriority,
   TicketStatus,
+  VerificationStatus,
   Vendor,
   VendorKind,
   XeroSyncStatus,
@@ -41,6 +46,8 @@ function uploadRoot() {
   return process.env.UPLOAD_DIR || './uploads';
 }
 
+const DEFAULT_REMAINING_DOCUMENTS = ['GRN', 'DELIVERY_NOTE', 'RECEIPT'];
+
 const invoiceInclude = Prisma.validator<Prisma.InvoiceInclude>()({
   vendor: true,
   department: true,
@@ -49,6 +56,14 @@ const invoiceInclude = Prisma.validator<Prisma.InvoiceInclude>()({
       vendor: true,
       department: true,
       lineItems: true,
+    },
+  },
+  paymentPlan: {
+    include: {
+      milestones: {
+        orderBy: { sequence: 'asc' },
+        include: { ticket: { select: { id: true, title: true, status: true, amountPkr: true } } },
+      },
     },
   },
   submittedBy: { select: { id: true, name: true, email: true } },
@@ -126,6 +141,7 @@ export class InvoicesService {
           });
 
     await this.ensureInvoicePurchaseOrder(inv.id, submittedBy.id);
+    await this.upsertPaymentPlanFromInvoice(inv.id, submittedBy.id);
     await this.upsertDepartmentTicketFromInvoice(inv.id, submittedBy.id);
 
     return this.prisma.invoice.findUniqueOrThrow({
@@ -137,17 +153,33 @@ export class InvoicesService {
   private async upsertDepartmentTicketFromInvoice(invoiceId: string, submittedById: string) {
     const inv = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { vendor: true, department: true, purchaseOrder: true },
+      include: {
+        vendor: true,
+        department: true,
+        purchaseOrder: true,
+        paymentPlan: { include: { milestones: { orderBy: { sequence: 'asc' } } } },
+      },
     });
     if (!inv) return;
     const existing = await this.prisma.paymentTicket.findUnique({ where: { invoiceId } });
+    const firstMilestone = this.firstPayableMilestone(inv.paymentPlan);
     const title =
       inv.invoiceNumber ??
       inv.reference ??
       inv.description ??
       `${inv.department.name} invoice ${invoiceId.slice(0, 8)}`;
+    const ticketTitle =
+      firstMilestone?.kind === PaymentMilestoneKind.ADVANCE
+        ? `${title} - advance payment`
+        : title;
+    const ticketAmount = firstMilestone?.amount ?? inv.amountPkr;
+    const billType = firstMilestone
+      ? this.billTypeForMilestone(firstMilestone.kind, inv.mimeType)
+      : inv.mimeType?.startsWith('image/')
+        ? BillType.CASH_SLIP
+        : BillType.STANDARD_INVOICE;
     const data = {
-      title,
+      title: ticketTitle,
       status: TicketStatus.NEW_REQUEST,
       priority: TicketPriority.NORMAL,
       department: { connect: { id: inv.departmentId } },
@@ -155,9 +187,7 @@ export class InvoicesService {
       submittedToFinanceAt: null,
       dueDate: inv.dueDate,
       expenseNature: ExpenseNature.OTHER,
-      billType: inv.mimeType?.startsWith('image/')
-        ? BillType.CASH_SLIP
-        : BillType.STANDARD_INVOICE,
+      billType,
       vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : undefined,
       vendorNameSnapshot: inv.vendor?.displayName ?? null,
       purchaseOrderNumber: inv.purchaseOrder?.poNumber,
@@ -165,7 +195,7 @@ export class InvoicesService {
       purchaseOrderVerified: false,
       invoiceNumber: inv.invoiceNumber ?? inv.reference,
       internalReference: `AP-${invoiceId.slice(0, 8).toUpperCase()}`,
-      amountPkr: inv.amountPkr,
+      amountPkr: ticketAmount,
       paymentMethod: PaymentMethod.BANK_PORTAL,
       accountVerificationStatus: AccountVerificationStatus.NOT_CHECKED,
       documentStatus: DocumentStatus.PENDING_REVIEW,
@@ -177,26 +207,30 @@ export class InvoicesService {
     } satisfies Prisma.PaymentTicketCreateInput;
 
     if (existing) {
-      if (
-        existing.status !== TicketStatus.NEW_REQUEST &&
-        existing.status !== TicketStatus.DEPARTMENT_HEAD_APPROVAL
-      ) {
+      if (existing.status !== TicketStatus.NEW_REQUEST) {
         return;
       }
       await this.prisma.paymentTicket.update({
         where: { id: existing.id },
         data: {
-          title,
+          title: ticketTitle,
           status: TicketStatus.NEW_REQUEST,
           dueDate: inv.dueDate,
           vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : { disconnect: true },
           vendorNameSnapshot: inv.vendor?.displayName ?? null,
           purchaseOrderNumber: inv.purchaseOrder?.poNumber,
           invoiceNumber: inv.invoiceNumber ?? inv.reference,
-          amountPkr: inv.amountPkr,
+          billType,
+          amountPkr: ticketAmount,
           notes: inv.description ?? existing.notes,
         },
       });
+      if (firstMilestone) {
+        await this.prisma.paymentMilestone.update({
+          where: { id: firstMilestone.id },
+          data: { ticket: { connect: { id: existing.id } } },
+        });
+      }
       return;
     }
 
@@ -233,7 +267,12 @@ export class InvoicesService {
   private async createTicketFromInvoice(invoiceId: string, submittedById: string) {
     const inv = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { vendor: true, department: true, purchaseOrder: true },
+      include: {
+        vendor: true,
+        department: true,
+        purchaseOrder: true,
+        paymentPlan: { include: { milestones: { orderBy: { sequence: 'asc' } } } },
+      },
     });
     if (!inv) return;
 
@@ -250,16 +289,25 @@ export class InvoicesService {
       inv.vendor?.displayName ??
       (typeof extracted.vendorName === 'string' ? extracted.vendorName : null);
     const needsVendorReview = inv.status === InvoiceStatus.VENDOR_UNVERIFIED;
+    const firstMilestone = this.firstPayableMilestone(inv.paymentPlan);
+    const ticketAmount = firstMilestone?.amount ?? inv.amountPkr;
+    const billType = firstMilestone
+      ? this.billTypeForMilestone(firstMilestone.kind, inv.mimeType)
+      : inv.mimeType?.startsWith('image/')
+        ? BillType.CASH_SLIP
+        : BillType.STANDARD_INVOICE;
+    const titleSuffix =
+      firstMilestone?.kind === PaymentMilestoneKind.ADVANCE ? ' - advance payment' : '';
 
     if (existing) {
       await this.prisma.paymentTicket.update({
         where: { id: existing.id },
         data: {
           title:
-            inv.invoiceNumber ??
-            inv.reference ??
-            inv.description ??
-            `${inv.department.name} invoice ${invoiceId.slice(0, 8)}`,
+            (inv.invoiceNumber ??
+              inv.reference ??
+              inv.description ??
+              `${inv.department.name} invoice ${invoiceId.slice(0, 8)}`) + titleSuffix,
           status: needsVendorReview
             ? TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION
             : TicketStatus.DOCS_REVIEW,
@@ -270,16 +318,17 @@ export class InvoicesService {
           purchaseOrderNumber: inv.purchaseOrder?.poNumber,
           purchaseOrderVerified: true,
           invoiceNumber: inv.invoiceNumber ?? inv.reference,
-          amountPkr: inv.amountPkr,
+          billType,
+          amountPkr: ticketAmount,
           accountVerificationSource: needsVendorReview
             ? 'Auto-created from invoice upload; verify vendor account from master sheet'
-            : 'Agent/head approved invoice and synced PO before finance release',
+            : 'Agent verified invoice and synced PO before finance release',
           notes: inv.description ?? existing.notes,
           activities: {
             create: {
               actor: { connect: { id: submittedById } },
               type: 'released_to_finance',
-              message: 'Department head approved; ticket released to finance',
+              message: 'Agent validation passed; ticket released to finance',
               fromStatus: existing.status,
               toStatus: needsVendorReview
                 ? TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION
@@ -288,15 +337,25 @@ export class InvoicesService {
           },
         },
       });
+      if (firstMilestone) {
+        await this.prisma.paymentMilestone.update({
+          where: { id: firstMilestone.id },
+          data: {
+            status: PaymentMilestoneStatus.IN_FINANCE,
+            releasedAt: new Date(),
+            ticket: { connect: { id: existing.id } },
+          },
+        });
+      }
       return;
     }
 
     const ticket = await this.prisma.paymentTicket.create({
       data: {
         title:
-          inv.reference ??
-          inv.description ??
-          `${inv.department.name} invoice ${invoiceId.slice(0, 8)}`,
+          (inv.reference ??
+            inv.description ??
+            `${inv.department.name} invoice ${invoiceId.slice(0, 8)}`) + titleSuffix,
         status: needsVendorReview
           ? TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION
           : TicketStatus.DOCS_REVIEW,
@@ -306,9 +365,7 @@ export class InvoicesService {
         submittedToFinanceAt,
         dueDate: calculateFinanceDueDate(submittedToFinanceAt),
         expenseNature: ExpenseNature.OTHER,
-        billType: inv.mimeType?.startsWith('image/')
-          ? BillType.CASH_SLIP
-          : BillType.STANDARD_INVOICE,
+        billType,
         vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : undefined,
         vendorNameSnapshot: vendorName,
         purchaseOrderNumber: inv.purchaseOrder?.poNumber,
@@ -316,14 +373,14 @@ export class InvoicesService {
         purchaseOrderVerified: true,
         invoiceNumber: inv.reference,
         internalReference: `AP-${invoiceId.slice(0, 8).toUpperCase()}`,
-        amountPkr: inv.amountPkr,
+        amountPkr: ticketAmount,
         paymentMethod: PaymentMethod.BANK_PORTAL,
         accountVerificationStatus: needsVendorReview
           ? AccountVerificationStatus.NEEDS_MANUAL_REVIEW
           : AccountVerificationStatus.NOT_CHECKED,
         accountVerificationSource: needsVendorReview
           ? 'Auto-created from invoice upload; verify vendor account from master sheet'
-          : 'Agent/head approved invoice and synced PO before finance release',
+          : 'Agent verified invoice and synced PO before finance release',
         documentStatus: needsVendorReview
           ? DocumentStatus.INCOMPLETE
           : DocumentStatus.PENDING_REVIEW,
@@ -368,7 +425,12 @@ export class InvoicesService {
   private async ensureInvoicePurchaseOrder(invoiceId: string, requestedById: string) {
     const inv = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { vendor: true, department: true, purchaseOrder: true },
+      include: {
+        vendor: true,
+        department: true,
+        purchaseOrder: true,
+        paymentPlan: { include: { milestones: { orderBy: { sequence: 'asc' } } } },
+      },
     });
     if (!inv) throw new NotFoundException();
 
@@ -439,6 +501,196 @@ export class InvoicesService {
     return po;
   }
 
+  private async upsertPaymentPlanFromInvoice(
+    invoiceId: string,
+    actorId: string,
+    dto?: Pick<
+      PatchInvoiceDto,
+      'paymentPlanType' | 'advancePercent' | 'releaseCondition' | 'requiredFinalDocuments'
+    >,
+  ) {
+    const inv = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        purchaseOrder: true,
+        paymentPlan: { include: { milestones: { orderBy: { sequence: 'asc' } } } },
+      },
+    });
+    if (!inv) throw new NotFoundException();
+
+    const totalAmount = inv.totalAmount.gt(0) ? inv.totalAmount : inv.amountPkr;
+    const existing = inv.paymentPlan;
+    const planType = dto?.paymentPlanType ?? existing?.planType ?? PaymentPlanType.FULL_PAYMENT;
+    const advancePercent =
+      planType === PaymentPlanType.ADVANCE_REMAINING
+        ? new Prisma.Decimal(dto?.advancePercent ?? existing?.advancePercent ?? 50)
+        : null;
+    const requiredFinalDocuments =
+      dto?.requiredFinalDocuments?.length
+        ? dto.requiredFinalDocuments
+        : existing?.requiredFinalDocuments?.length
+          ? existing.requiredFinalDocuments
+          : DEFAULT_REMAINING_DOCUMENTS;
+    const releaseCondition =
+      dto?.releaseCondition ??
+      existing?.releaseCondition ??
+      'Products/services received and GRN or delivery proof attached';
+
+    const plan = existing
+      ? await this.prisma.paymentPlan.update({
+          where: { id: existing.id },
+          data: {
+            planType,
+            purchaseOrder: inv.poId ? { connect: { id: inv.poId } } : { disconnect: true },
+            department: { connect: { id: inv.departmentId } },
+            vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : { disconnect: true },
+            totalAmount,
+            remainingAmount: totalAmount.minus(existing.paidAmount),
+            advancePercent,
+            releaseCondition,
+            requiredFinalDocuments,
+            aiVerificationStatus: VerificationStatus.PENDING,
+            aiVerificationScore: 0,
+            aiVerificationNotes: null,
+          },
+        })
+      : await this.prisma.paymentPlan.create({
+          data: {
+            planNumber: `PP-${invoiceId.slice(0, 8).toUpperCase()}`,
+            planType,
+            status: PaymentPlanStatus.DRAFT,
+            invoice: { connect: { id: invoiceId } },
+            purchaseOrder: inv.poId ? { connect: { id: inv.poId } } : undefined,
+            department: { connect: { id: inv.departmentId } },
+            vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : undefined,
+            createdBy: { connect: { id: actorId } },
+            totalAmount,
+            paidAmount: new Prisma.Decimal(0),
+            remainingAmount: totalAmount,
+            advancePercent,
+            releaseCondition,
+            requiredFinalDocuments,
+          },
+        });
+
+    if (planType === PaymentPlanType.ADVANCE_REMAINING) {
+      const percent = advancePercent ?? new Prisma.Decimal(50);
+      const advanceAmount = totalAmount.mul(percent).div(100);
+      const remainingAmount = totalAmount.minus(advanceAmount);
+
+      await this.upsertMilestone(plan.id, {
+        sequence: 1,
+        label: `Advance ${percent.toFixed(0)}% payment`,
+        kind: PaymentMilestoneKind.ADVANCE,
+        amount: advanceAmount,
+        percent,
+        status: PaymentMilestoneStatus.DRAFT,
+        requiredDocuments: ['INVOICE', 'PO'],
+      });
+      await this.upsertMilestone(plan.id, {
+        sequence: 2,
+        label: 'Remaining payment after receiving proof',
+        kind: PaymentMilestoneKind.REMAINING,
+        amount: remainingAmount,
+        percent: new Prisma.Decimal(100).minus(percent),
+        status: PaymentMilestoneStatus.BLOCKED,
+        releaseCondition,
+        requiredDocuments: requiredFinalDocuments,
+      });
+      await this.prisma.paymentMilestone.deleteMany({
+        where: { paymentPlanId: plan.id, sequence: { gt: 2 }, status: { not: PaymentMilestoneStatus.PAID } },
+      });
+    } else {
+      await this.upsertMilestone(plan.id, {
+        sequence: 1,
+        label: 'Full payment',
+        kind: PaymentMilestoneKind.FULL,
+        amount: totalAmount,
+        percent: new Prisma.Decimal(100),
+        status: PaymentMilestoneStatus.DRAFT,
+        requiredDocuments: ['INVOICE', 'PO'],
+      });
+      await this.prisma.paymentMilestone.deleteMany({
+        where: { paymentPlanId: plan.id, sequence: { gt: 1 }, status: { not: PaymentMilestoneStatus.PAID } },
+      });
+    }
+
+    return this.prisma.paymentPlan.findUniqueOrThrow({
+      where: { id: plan.id },
+      include: {
+        milestones: {
+          orderBy: { sequence: 'asc' },
+          include: { ticket: { select: { id: true, title: true, status: true, amountPkr: true } } },
+        },
+      },
+    });
+  }
+
+  private async upsertMilestone(
+    paymentPlanId: string,
+    data: {
+      sequence: number;
+      label: string;
+      kind: PaymentMilestoneKind;
+      amount: Prisma.Decimal;
+      percent?: Prisma.Decimal | null;
+      status: PaymentMilestoneStatus;
+      releaseCondition?: string | null;
+      requiredDocuments: string[];
+    },
+  ) {
+    const existing = await this.prisma.paymentMilestone.findUnique({
+      where: {
+        paymentPlanId_sequence: {
+          paymentPlanId,
+          sequence: data.sequence,
+        },
+      },
+    });
+    const nextData = {
+      label: data.label,
+      kind: data.kind,
+      amount: data.amount,
+      percent: data.percent ?? null,
+      releaseCondition: data.releaseCondition ?? null,
+      requiredDocuments: data.requiredDocuments,
+      status: existing?.status === PaymentMilestoneStatus.PAID ? existing.status : data.status,
+    };
+    return existing
+      ? this.prisma.paymentMilestone.update({ where: { id: existing.id }, data: nextData })
+      : this.prisma.paymentMilestone.create({
+          data: {
+            paymentPlan: { connect: { id: paymentPlanId } },
+            sequence: data.sequence,
+            ...nextData,
+          },
+        });
+  }
+
+  private firstPayableMilestone(
+    plan:
+      | (Prisma.PaymentPlanGetPayload<{
+          include: { milestones: { orderBy: { sequence: 'asc' } } };
+        }>)
+      | null,
+  ) {
+    const firstKinds: PaymentMilestoneKind[] = [
+      PaymentMilestoneKind.FULL,
+      PaymentMilestoneKind.ADVANCE,
+    ];
+    return plan?.milestones.find((milestone) =>
+      firstKinds.includes(milestone.kind),
+    );
+  }
+
+  private billTypeForMilestone(kind: PaymentMilestoneKind, mimeType?: string | null) {
+    if (kind === PaymentMilestoneKind.ADVANCE) return BillType.ADVANCE_PARTIAL;
+    if (kind === PaymentMilestoneKind.REMAINING || kind === PaymentMilestoneKind.FINAL) {
+      return BillType.FINAL_PARTIAL;
+    }
+    return mimeType?.startsWith('image/') ? BillType.CASH_SLIP : BillType.STANDARD_INVOICE;
+  }
+
   private async ensurePendingVendor(departmentId: string, departmentName: string) {
     const vendorCode = `PENDING-${departmentId.slice(0, 18)}`;
     const existing = await this.prisma.vendor.findFirst({
@@ -459,7 +711,12 @@ export class InvoicesService {
   private async runAgentVerification(invoiceId: string) {
     const inv = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { vendor: true, department: true, purchaseOrder: true },
+      include: {
+        vendor: true,
+        department: true,
+        purchaseOrder: true,
+        paymentPlan: { include: { milestones: { orderBy: { sequence: 'asc' } } } },
+      },
     });
     if (!inv) throw new NotFoundException();
 
@@ -470,7 +727,7 @@ export class InvoicesService {
     if (!inv.invoiceNumber && !inv.reference) errors.push('Invoice number or reference is required');
     if (invoiceTotal.lte(0)) errors.push('Invoice amount must be greater than zero');
     if (!inv.vendorId || inv.vendor?.displayName.startsWith('Vendor pending')) {
-      errors.push('Vendor must be selected before department head approval');
+      errors.push('Vendor must be selected before finance release');
     }
     if (!inv.poId || !inv.purchaseOrder) {
       errors.push('Synced purchase order is required');
@@ -487,6 +744,31 @@ export class InvoicesService {
     }
     if (!inv.dueDate) warnings.push('Due date is not provided');
     if (!inv.description) warnings.push('Description is not provided');
+    if (!inv.paymentPlan) {
+      errors.push('Payment plan is required');
+    } else {
+      const milestoneTotal = inv.paymentPlan.milestones.reduce(
+        (sum, milestone) => sum.plus(milestone.amount),
+        new Prisma.Decimal(0),
+      );
+      if (!milestoneTotal.equals(invoiceTotal)) {
+        errors.push('Payment milestone total must match invoice/PO total');
+      }
+      if (inv.paymentPlan.planType === PaymentPlanType.ADVANCE_REMAINING) {
+        if (!inv.paymentPlan.advancePercent || inv.paymentPlan.advancePercent.lte(0)) {
+          errors.push('Advance percent must be configured');
+        }
+        if (!inv.paymentPlan.milestones.some((m) => m.kind === PaymentMilestoneKind.ADVANCE)) {
+          errors.push('Advance milestone is required');
+        }
+        if (!inv.paymentPlan.milestones.some((m) => m.kind === PaymentMilestoneKind.REMAINING)) {
+          errors.push('Remaining milestone is required');
+        }
+        if (!inv.paymentPlan.requiredFinalDocuments.length) {
+          warnings.push('Remaining payment proof requirements are not configured');
+        }
+      }
+    }
 
     const extracted =
       inv.extracted && typeof inv.extracted === 'object' && !Array.isArray(inv.extracted)
@@ -519,7 +801,7 @@ export class InvoicesService {
     const inv = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!inv) throw new NotFoundException();
     if (inv.status !== InvoiceStatus.APPROVED) {
-      throw new BadRequestException('Invoice must be department-head approved before finance release');
+      throw new BadRequestException('Invoice must be agent-approved before finance release');
     }
     if (inv.poId) {
       await this.prisma.purchaseOrder.update({
@@ -527,7 +809,12 @@ export class InvoicesService {
         data: { status: PurchaseOrderStatus.APPROVED },
       });
     }
+    await this.upsertPaymentPlanFromInvoice(invoiceId, actorId);
     await this.createTicketFromInvoice(invoiceId, actorId);
+    await this.prisma.paymentPlan.updateMany({
+      where: { invoiceId, status: PaymentPlanStatus.DRAFT },
+      data: { status: PaymentPlanStatus.ACTIVE },
+    });
     return this.prisma.invoice.findUniqueOrThrow({
       where: { id: invoiceId },
       include: invoiceInclude,
@@ -541,9 +828,9 @@ export class InvoicesService {
         status: TicketStatus.NEW_REQUEST,
         documentStatus: DocumentStatus.INCOMPLETE,
         missingDocuments: reason
-          ? [`Department head rejection: ${reason}`]
-          : ['Department head rejected'],
-        notes: reason ? `Rejected by department head: ${reason}` : 'Rejected by department head',
+          ? [`Returned by reviewer: ${reason}`]
+          : ['Returned by reviewer'],
+        notes: reason ? `Returned by reviewer: ${reason}` : 'Returned by reviewer',
       },
     });
 
@@ -553,9 +840,9 @@ export class InvoicesService {
         data: {
           ticket: { connect: { id: ticket.id } },
           actor: { connect: { id: actorId } },
-          type: 'department_head_rejected',
-          message: reason ? `Rejected by department head: ${reason}` : 'Rejected by department head',
-          fromStatus: TicketStatus.DEPARTMENT_HEAD_APPROVAL,
+          type: 'reviewer_returned',
+          message: reason ? `Returned by reviewer: ${reason}` : 'Returned by reviewer',
+          fromStatus: TicketStatus.DOCS_REVIEW,
           toStatus: TicketStatus.NEW_REQUEST,
         },
       });
@@ -697,6 +984,7 @@ export class InvoicesService {
 
     if (dto.vendorId) {
       await this.ensureInvoicePurchaseOrder(updated.id, user.id);
+      await this.upsertPaymentPlanFromInvoice(updated.id, user.id, dto);
       await this.upsertDepartmentTicketFromInvoice(updated.id, user.id);
       await this.syncTicketFromInvoice(updated.id);
       return this.prisma.invoice.findUniqueOrThrow({
@@ -706,6 +994,7 @@ export class InvoicesService {
     }
     if (inv.vendorId && inv.status === InvoiceStatus.VENDOR_VERIFIED) {
       await this.ensureInvoicePurchaseOrder(updated.id, user.id);
+      await this.upsertPaymentPlanFromInvoice(updated.id, user.id, dto);
       await this.upsertDepartmentTicketFromInvoice(updated.id, user.id);
       await this.syncTicketFromInvoice(updated.id);
       return this.prisma.invoice.findUniqueOrThrow({
@@ -716,6 +1005,7 @@ export class InvoicesService {
 
     const matched = await this.applyVendorMatch(id);
     await this.ensureInvoicePurchaseOrder(id, user.id);
+    await this.upsertPaymentPlanFromInvoice(id, user.id, dto);
     await this.upsertDepartmentTicketFromInvoice(id, user.id);
     await this.syncTicketFromInvoice(id);
     return this.prisma.invoice.findUniqueOrThrow({
@@ -727,7 +1017,11 @@ export class InvoicesService {
   private async syncTicketFromInvoice(invoiceId: string) {
     const inv = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { vendor: true, department: true },
+      include: {
+        vendor: true,
+        department: true,
+        paymentPlan: { include: { milestones: { orderBy: { sequence: 'asc' } } } },
+      },
     });
     if (!inv) return;
 
@@ -741,13 +1035,19 @@ export class InvoicesService {
       inv.reference ??
       inv.description ??
       `${inv.department.name} invoice ${invoiceId.slice(0, 8)}`;
+    const firstMilestone = this.firstPayableMilestone(inv.paymentPlan);
+    const titleSuffix =
+      firstMilestone?.kind === PaymentMilestoneKind.ADVANCE ? ' - advance payment' : '';
 
     await this.prisma.paymentTicket.update({
       where: { id: ticket.id },
       data: {
-        title,
+        title: `${title}${titleSuffix}`,
         invoiceNumber: inv.invoiceNumber ?? inv.reference,
-        amountPkr: inv.amountPkr,
+        billType: firstMilestone
+          ? this.billTypeForMilestone(firstMilestone.kind)
+          : ticket.billType,
+        amountPkr: firstMilestone?.amount ?? inv.amountPkr,
         dueDate: inv.dueDate ?? ticket.dueDate,
         vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : undefined,
         vendorNameSnapshot:
@@ -769,7 +1069,7 @@ export class InvoicesService {
       throw new ForbiddenException('Invoice is outside your department scope');
     }
     if (user.role === Role.DEPT_ADMIN) {
-      throw new ForbiddenException('Department head cannot submit requests to themselves');
+      throw new ForbiddenException('Department admins are not part of the AP submission scope');
     }
     if (inv.amountPkr.lte(0)) {
       throw new BadRequestException('Amount must be greater than zero');
@@ -780,18 +1080,27 @@ export class InvoicesService {
       );
     }
     await this.ensureInvoicePurchaseOrder(id, user.id);
+    await this.upsertPaymentPlanFromInvoice(id, user.id);
     await this.runAgentVerification(id);
-    await this.prisma.paymentTicket.updateMany({
-      where: { invoiceId: id },
-      data: {
-        status: TicketStatus.DEPARTMENT_HEAD_APPROVAL,
-        notes: 'Agent verification passed; waiting for department head approval',
-      },
+    await this.prisma.invoice.update({
+      where: { id },
+      data: { status: InvoiceStatus.APPROVED },
+    });
+    const invoice = await this.prisma.invoice.findUnique({ where: { id } });
+    if (invoice?.poId) {
+      await this.prisma.purchaseOrder.update({
+        where: { id: invoice.poId },
+        data: { status: PurchaseOrderStatus.APPROVED },
+      });
+    }
+    await this.createTicketFromInvoice(id, user.id);
+    await this.prisma.paymentPlan.updateMany({
+      where: { invoiceId: id, status: PaymentPlanStatus.DRAFT },
+      data: { status: PaymentPlanStatus.ACTIVE },
     });
 
-    return this.prisma.invoice.update({
+    return this.prisma.invoice.findUniqueOrThrow({
       where: { id },
-      data: { status: InvoiceStatus.AWAITING_APPROVAL },
       include: invoiceInclude,
     });
   }
@@ -816,9 +1125,6 @@ export class InvoicesService {
         ...args,
         where: {
           departmentId: user.departmentId,
-          ...(user.role === Role.DEPT_ADMIN
-            ? { status: InvoiceStatus.AWAITING_APPROVAL }
-            : {}),
         },
       });
     }
@@ -892,6 +1198,8 @@ export class InvoicesService {
     });
     const invoice = await this.applyVendorMatch(inv.id);
     await this.ensureInvoicePurchaseOrder(inv.id, submittedBy.id);
+    await this.upsertPaymentPlanFromInvoice(inv.id, submittedBy.id);
+    await this.upsertDepartmentTicketFromInvoice(inv.id, submittedBy.id);
     return this.prisma.invoice.findUniqueOrThrow({
       where: { id: invoice.id },
       include: invoiceInclude,

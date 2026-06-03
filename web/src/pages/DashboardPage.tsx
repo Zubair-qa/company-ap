@@ -41,8 +41,7 @@ const statusMeta: Array<{ key: string; label: string; tone: Tone }> = [
   { key: 'EXTRACTED', label: 'Extracted', tone: 'indigo' },
   { key: 'VENDOR_UNVERIFIED', label: 'Vendor review', tone: 'amber' },
   { key: 'VENDOR_VERIFIED', label: 'Vendor verified', tone: 'cyan' },
-  { key: 'AWAITING_APPROVAL', label: 'Awaiting approval', tone: 'amber' },
-  { key: 'APPROVED', label: 'Approved', tone: 'emerald' },
+  { key: 'APPROVED', label: 'Released to AP', tone: 'emerald' },
   { key: 'REJECTED', label: 'Rejected', tone: 'rose' },
   { key: 'PAYMENT_INITIATED', label: 'Payment started', tone: 'indigo' },
   { key: 'PAYMENT_FAILED', label: 'Payment failed', tone: 'rose' },
@@ -61,7 +60,6 @@ const pendingStatuses = new Set([
   'EXTRACTED',
   'VENDOR_UNVERIFIED',
   'VENDOR_VERIFIED',
-  'AWAITING_APPROVAL',
   'APPROVED',
   'PAYMENT_INITIATED',
   'PAYMENT_FAILED',
@@ -83,6 +81,15 @@ function statusLabel(status: string) {
 
 function statusTone(status: string): Tone {
   return statusMeta.find((item) => item.key === status)?.tone ?? 'slate';
+}
+
+function displayPersonName(name: string | undefined | null) {
+  return name === 'AP Clerk' ? 'AP Finance' : name ?? '';
+}
+
+function displayRole(role: string) {
+  if (role === 'AP_CLERK') return 'AP Finance';
+  return role.replaceAll('_', ' ');
 }
 
 function formatDate(value?: string | null) {
@@ -115,7 +122,7 @@ export function DashboardPage() {
     const paidAmount = invoices
       .filter((inv) => inv.status === 'PAID')
       .reduce((sum, inv) => sum + amountOf(inv), 0);
-    const awaitingCount = invoices.filter((inv) => inv.status === 'AWAITING_APPROVAL').length;
+    const releasedCount = invoices.filter((inv) => inv.status === 'APPROVED').length;
     const reviewCount = invoices.filter((inv) =>
       ['EXTRACTED', 'VENDOR_UNVERIFIED', 'VENDOR_VERIFIED'].includes(inv.status),
     ).length;
@@ -153,7 +160,7 @@ export function DashboardPage() {
       pendingAmount,
       payableAmount,
       paidAmount,
-      awaitingCount,
+      awaitingCount: releasedCount,
       reviewCount,
       departmentTotals,
       statusTotals,
@@ -162,9 +169,7 @@ export function DashboardPage() {
 
   const actionInvoices = useMemo(() => {
     const statuses =
-      user?.role === 'DEPT_ADMIN'
-        ? ['AWAITING_APPROVAL']
-        : user?.role === 'DEPT_USER'
+      user?.role === 'DEPT_USER'
           ? ['REJECTED', 'EXTRACTED', 'VENDOR_UNVERIFIED', 'VENDOR_VERIFIED']
         : [
             'VENDOR_UNVERIFIED',
@@ -180,7 +185,7 @@ export function DashboardPage() {
   if (!user) return null;
 
   const canUpload = user.role === 'DEPT_USER' || user.role === 'COMPANY_ADMIN';
-  const roleName = user.role.replaceAll('_', ' ');
+  const roleName = displayRole(user.role);
   const largestDepartment = Math.max(
     1,
     ...dashboard.departmentTotals.map((dept) => dept.amount),
@@ -195,7 +200,7 @@ export function DashboardPage() {
           <p className="eyebrow">AP command center</p>
           <h2>Dashboard</h2>
           <p className="dashboard-subtitle">
-            {user.departmentId ? `${user.name} · ${roleName}` : roleName}
+            {user.departmentId ? `${displayPersonName(user.name)} / ${roleName}` : roleName}
           </p>
         </div>
         <div className="dashboard-hero-actions">
@@ -227,7 +232,7 @@ export function DashboardPage() {
         <MetricCard
           label="Ready to pay"
           value={money(dashboard.payableAmount)}
-          detail={`${dashboard.awaitingCount} awaiting approval`}
+          detail={`${dashboard.awaitingCount} released to AP`}
           tone="emerald"
         />
         <MetricCard
@@ -305,7 +310,7 @@ export function DashboardPage() {
               <p className="eyebrow">Queue</p>
               <h3>
                 {user.role === 'DEPT_ADMIN'
-                  ? 'Head approvals'
+                  ? 'Department queue'
                   : user.role === 'DEPT_USER'
                     ? 'Department actions'
                     : 'AP actions'}

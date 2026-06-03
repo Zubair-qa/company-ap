@@ -11,7 +11,12 @@ export type ExtractedInvoice = {
 };
 
 function normalizeKey(k: string) {
-  return k.trim().toLowerCase().replace(/\s+/g, '_');
+  return k
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 function rowToObject(row: unknown[]): Record<string, string | number | null> {
@@ -56,13 +61,24 @@ export function parseSpreadsheetBuffer(buf: Buffer): ExtractedInvoice {
     const vendorTaxNumber =
       firstString(map, ['tax', 'tax_number', 'ntn', 'ntn_strn', 'strn']) ?? undefined;
     const reference =
-      firstString(map, ['invoice', 'invoice_no', 'reference', 'bill_no']) ?? undefined;
+      firstString(map, [
+        'invoice',
+        'invoice_no',
+        'invoice_number',
+        'reference',
+        'ref',
+        'bill_no',
+        'bill_number',
+      ]) ?? undefined;
     const amountPkr = firstAmount(map, [
       'amount',
       'total',
       'amount_pkr',
+      'amountpkr',
       'grand_total',
+      'invoice_amount',
       'net_payable',
+      'payable_amount',
     ]);
     const dueDate =
       firstString(map, ['due_date', 'duedate', 'due']) ?? undefined;

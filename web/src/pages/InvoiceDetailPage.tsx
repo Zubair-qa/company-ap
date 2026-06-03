@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AxiosError } from 'axios';
 import { Link, useParams } from 'react-router-dom';
@@ -45,6 +45,30 @@ type InvoiceDetail = {
   department: { name: string };
   vendor: Vendor | null;
   purchaseOrder: PurchaseOrderSummary | null;
+  paymentPlan: {
+    id: string;
+    planNumber: string;
+    planType: string;
+    status: string;
+    totalAmount: string;
+    paidAmount: string;
+    remainingAmount: string;
+    advancePercent: string | null;
+    releaseCondition: string | null;
+    requiredFinalDocuments: string[];
+    aiVerificationStatus: string;
+    aiVerificationScore: number;
+    milestones: Array<{
+      id: string;
+      sequence: number;
+      label: string;
+      kind: string;
+      status: string;
+      amount: string;
+      percent: string | null;
+      ticket: { id: string; title: string; status: string; amountPkr: string } | null;
+    }>;
+  } | null;
 };
 
 type ApiError = {
@@ -81,9 +105,7 @@ export function InvoiceDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const qc = useQueryClient();
-  const [note, setNote] = useState('');
   const [notice, setNotice] = useState<Notice>(null);
-  const [approvalDecision, setApprovalDecision] = useState<'approved' | 'rejected' | null>(null);
 
   const { data: inv, isError, isLoading } = useQuery({
     queryKey: ['invoice', id],
@@ -109,10 +131,6 @@ export function InvoiceDetailPage() {
       return data;
     },
   });
-
-  useEffect(() => {
-    setApprovalDecision(null);
-  }, [id]);
 
   const patch = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
@@ -141,38 +159,13 @@ export function InvoiceDetailPage() {
     onSuccess: async () => {
       setNotice({
         type: 'success',
-        text: 'Agent verification passed. Request sent to department head.',
+        text: 'Agent verification passed. Request released to AP finance.',
       });
       await qc.invalidateQueries({ queryKey: ['invoice', id] });
       await qc.invalidateQueries({ queryKey: ['invoices'] });
     },
     onError: (error: unknown) => {
       setNotice({ type: 'error', text: errorMessage(error, 'Agent verification failed.') });
-    },
-  });
-
-  const decide = useMutation({
-    mutationFn: async (approved: boolean) => {
-      const { data } = await api.post<InvoiceDetail>(`/api/approvals/${id}`, {
-        approved,
-        note: note || undefined,
-      });
-      return data;
-    },
-    onSuccess: (_, approved) => {
-      setApprovalDecision(approved ? 'approved' : 'rejected');
-      setNotice({
-        type: 'success',
-        text: approved
-          ? 'Department head approved. Request released to finance AP board.'
-          : 'Request rejected and returned to department.',
-      });
-      qc.invalidateQueries({ queryKey: ['invoice', id] });
-      qc.invalidateQueries({ queryKey: ['invoices'] });
-      qc.invalidateQueries({ queryKey: ['ticket-board'] });
-    },
-    onError: () => {
-      setNotice({ type: 'error', text: 'Approval action could not be completed.' });
     },
   });
 
@@ -197,10 +190,6 @@ export function InvoiceDetailPage() {
   const canEdit =
     canFinanceEdit ||
     (isDepartmentOwner && !!inv?.status && departmentEditableStatuses.has(inv.status));
-  const canApprove =
-    (user?.role === 'DEPT_ADMIN' || user?.role === 'COMPANY_ADMIN') &&
-    inv?.status === 'AWAITING_APPROVAL' &&
-    approvalDecision === null;
   const canSubmitApproval =
     ((user?.role === 'DEPT_USER' && isDepartmentOwner) || user?.role === 'COMPANY_ADMIN') &&
     inv?.status === 'VENDOR_VERIFIED' &&
@@ -232,7 +221,7 @@ export function InvoiceDetailPage() {
   if (!id) return <p className="error">Missing id</p>;
   const paymentError = getApiErrorMessage(pay.error);
   if (isLoading) return <p className="muted">Loading...</p>;
-  if ((isError && !approvalDecision) || !inv) {
+  if (isError || !inv) {
     return (
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Invoice could not be loaded</h2>
@@ -254,20 +243,6 @@ export function InvoiceDetailPage() {
       {notice ? (
         <div className={`notice notice-${notice.type}`} style={{ marginBottom: '1rem' }}>
           {notice.text}
-        </div>
-      ) : null}
-
-      {approvalDecision ? (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ marginTop: 0 }}>Department head status</h3>
-          <p className="muted">
-            {approvalDecision === 'approved'
-              ? 'Approved. Request has been released to finance AP board.'
-              : 'Rejected. Request has been returned to department.'}
-          </p>
-          <span className={`badge ${approvalDecision === 'approved' ? 'badge-emerald' : 'badge-rose'}`}>
-            {approvalDecision === 'approved' ? 'Approved' : 'Rejected'}
-          </span>
         </div>
       ) : null}
 
@@ -304,6 +279,7 @@ export function InvoiceDetailPage() {
           </p>
         ) : null}
         <AgentVerification extracted={inv.extracted} />
+        <PaymentPlanSummary invoice={inv} />
         <details style={{ marginTop: '0.75rem' }}>
           <summary>Extracted JSON</summary>
           <pre style={{ fontSize: 12, overflow: 'auto' }}>
@@ -321,9 +297,10 @@ export function InvoiceDetailPage() {
 
       {canSubmitApproval ? (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Submit to department head</h3>
+          <h3 style={{ marginTop: 0 }}>Submit to AP finance</h3>
           <p className="muted">
-            Agent verification runs first, then the request moves to department head approval.
+            Agent verification runs first. If invoice, PO, vendor, and payment plan are valid,
+            the request moves directly to AP finance.
           </p>
           <button
             type="button"
@@ -331,39 +308,8 @@ export function InvoiceDetailPage() {
             disabled={submitApproval.isPending}
             onClick={() => submitApproval.mutate()}
           >
-            {submitApproval.isPending ? 'Verifying...' : 'Submit to head'}
+            {submitApproval.isPending ? 'Verifying...' : 'Submit to finance'}
           </button>
-        </div>
-      ) : null}
-
-      {canApprove ? (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>Approval</h3>
-          <p className="muted">
-            Department head decision. Approval releases the synced invoice and PO to finance.
-          </p>
-          <div className="field">
-            <label htmlFor="note">Note (optional)</label>
-            <textarea id="note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
-          </div>
-          <div className="row-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={decide.isPending}
-              onClick={() => decide.mutate(true)}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger"
-              disabled={decide.isPending}
-              onClick={() => decide.mutate(false)}
-            >
-              Reject
-            </button>
-          </div>
         </div>
       ) : null}
 
@@ -439,6 +385,21 @@ function EditInvoiceForm({
   const [taxAmount, setTaxAmount] = useState(invoice.taxAmount ?? '0');
   const [withholdingTax, setWithholdingTax] = useState(invoice.withholdingTax ?? '0');
   const [totalAmount, setTotalAmount] = useState(invoice.totalAmount ?? invoice.amountPkr ?? '0');
+  const [paymentPlanType, setPaymentPlanType] = useState(
+    invoice.paymentPlan?.planType ?? 'FULL_PAYMENT',
+  );
+  const [advancePercent, setAdvancePercent] = useState(
+    invoice.paymentPlan?.advancePercent ?? '50',
+  );
+  const [releaseCondition, setReleaseCondition] = useState(
+    invoice.paymentPlan?.releaseCondition ??
+      'Products/services received and GRN or delivery proof attached',
+  );
+  const [requiredFinalDocuments, setRequiredFinalDocuments] = useState(
+    invoice.paymentPlan?.requiredFinalDocuments?.length
+      ? invoice.paymentPlan.requiredFinalDocuments.join('\n')
+      : 'GRN\nDELIVERY_NOTE\nRECEIPT',
+  );
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -457,6 +418,18 @@ function EditInvoiceForm({
       taxAmount: Number(taxAmount || 0),
       withholdingTax: Number(withholdingTax || 0),
       totalAmount: Number(totalAmount || amountPkr || 0),
+      paymentPlanType,
+      advancePercent:
+        paymentPlanType === 'ADVANCE_REMAINING' ? Number(advancePercent || 50) : undefined,
+      releaseCondition:
+        paymentPlanType === 'ADVANCE_REMAINING' ? releaseCondition || undefined : undefined,
+      requiredFinalDocuments:
+        paymentPlanType === 'ADVANCE_REMAINING'
+          ? requiredFinalDocuments
+              .split('\n')
+              .map((item) => item.trim())
+              .filter(Boolean)
+          : undefined,
     });
   }
 
@@ -610,6 +583,63 @@ function EditInvoiceForm({
             <label>Description / PO notes / expense detail</label>
             <textarea rows={3} value={description} onChange={(e) => setDesc(e.target.value)} />
           </div>
+          <div className="field">
+            <label>Payment structure</label>
+            <select
+              value={paymentPlanType}
+              onChange={(e) => setPaymentPlanType(e.target.value)}
+            >
+              <option value="FULL_PAYMENT">Full payment</option>
+              <option value="ADVANCE_REMAINING">Advance + remaining</option>
+            </select>
+          </div>
+          {paymentPlanType === 'ADVANCE_REMAINING' ? (
+            <>
+              <div className="field">
+                <label>Advance percent</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  step={1}
+                  value={advancePercent}
+                  onChange={(e) => setAdvancePercent(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Advance amount</label>
+                <input
+                  value={pkr.format((Number(totalAmount || 0) * Number(advancePercent || 0)) / 100)}
+                  disabled
+                />
+              </div>
+              <div className="field">
+                <label>Remaining amount</label>
+                <input
+                  value={pkr.format(
+                    Number(totalAmount || 0) -
+                      (Number(totalAmount || 0) * Number(advancePercent || 0)) / 100,
+                  )}
+                  disabled
+                />
+              </div>
+              <div className="field ticket-wide-field">
+                <label>Remaining release condition</label>
+                <input
+                  value={releaseCondition}
+                  onChange={(e) => setReleaseCondition(e.target.value)}
+                />
+              </div>
+              <div className="field ticket-wide-field">
+                <label>Required final proof documents</label>
+                <textarea
+                  rows={3}
+                  value={requiredFinalDocuments}
+                  onChange={(e) => setRequiredFinalDocuments(e.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
         </div>
         <button type="submit" className="btn btn-secondary" disabled={saving}>
           {saving ? 'Saving...' : 'Save invoice details'}
@@ -622,6 +652,62 @@ function EditInvoiceForm({
 function toDateInput(value: string | null | undefined) {
   if (!value) return '';
   return value.slice(0, 10);
+}
+
+function PaymentPlanSummary({ invoice }: { invoice: InvoiceDetail }) {
+  const plan = invoice.paymentPlan;
+  if (!plan) return null;
+  return (
+    <div className="payment-plan-summary">
+      <div className="payment-plan-header">
+        <div>
+          <strong>{plan.planNumber}</strong>
+          <small>
+            {plan.planType.replaceAll('_', ' ').toLowerCase()} /{' '}
+            {plan.status.replaceAll('_', ' ').toLowerCase()}
+          </small>
+        </div>
+        <span className="badge badge-indigo">
+          AI {plan.aiVerificationStatus.replaceAll('_', ' ').toLowerCase()} {plan.aiVerificationScore}%
+        </span>
+      </div>
+      <div className="payment-plan-totals">
+        <span>
+          <small>Total</small>
+          <strong>{pkr.format(Number(plan.totalAmount))}</strong>
+        </span>
+        <span>
+          <small>Paid</small>
+          <strong>{pkr.format(Number(plan.paidAmount))}</strong>
+        </span>
+        <span>
+          <small>Remaining</small>
+          <strong>{pkr.format(Number(plan.remainingAmount))}</strong>
+        </span>
+      </div>
+      <div className="payment-milestone-list">
+        {plan.milestones.map((milestone) => (
+          <div className="payment-milestone-row" key={milestone.id}>
+            <span>
+              <strong>{milestone.label}</strong>
+              <small>
+                {milestone.kind.replaceAll('_', ' ').toLowerCase()} /{' '}
+                {milestone.status.replaceAll('_', ' ').toLowerCase()}
+              </small>
+            </span>
+            <strong>{pkr.format(Number(milestone.amount))}</strong>
+            {milestone.ticket ? (
+              <Link to={`/tickets/${milestone.ticket.id}`}>
+                {milestone.ticket.status.replaceAll('_', ' ').toLowerCase()}
+              </Link>
+            ) : (
+              <small>No ticket yet</small>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function AgentVerification({ extracted }: { extracted: unknown }) {

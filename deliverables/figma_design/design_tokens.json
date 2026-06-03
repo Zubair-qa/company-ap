@@ -1,0 +1,70 @@
+{
+  "project": "Company AP Automation",
+  "surface": "Figma clickable demo",
+  "colors": {
+    "navy": "#0B2545",
+    "ink": "#172033",
+    "muted": "#64748B",
+    "line": "#D7DEE8",
+    "background": "#EEF2F7",
+    "surface": "#FFFFFF",
+    "soft": "#F6F8FB",
+    "tealAgent": "#14B8A6",
+    "bluePrimary": "#2563EB",
+    "indigoAssist": "#4F46E5",
+    "greenSuccess": "#16A34A",
+    "amberHuman": "#D97706",
+    "redApproval": "#DC2626"
+  },
+  "typography": {
+    "fontFamily": "Inter, Segoe UI, Arial",
+    "pageTitle": { "size": 20, "weight": 800 },
+    "sectionTitle": { "size": 17, "weight": 800 },
+    "body": { "size": 14, "weight": 400 },
+    "caption": { "size": 12, "weight": 600 },
+    "button": { "size": 13, "weight": 700 }
+  },
+  "spacing": {
+    "pagePadding": 24,
+    "panelPadding": 18,
+    "gridGap": 18,
+    "cardGap": 12
+  },
+  "radii": {
+    "button": 9,
+    "card": 13,
+    "panel": 16,
+    "hero": 22
+  },
+  "icons": {
+    "human": "person icon, amber",
+    "aiAgent": "robot/agent icon, teal",
+    "assist": "robot/check icon, indigo",
+    "approval": "exclamation/approval gate icon, red"
+  },
+  "badges": [
+    "AI Ready",
+    "Needs Review",
+    "High Risk",
+    "Human Approval",
+    "Payment Complete",
+    "SLA Risk",
+    "Document Missing",
+    "AI Verified %",
+    "Xero Ready",
+    "Gateway Confirmed"
+  ],
+  "prototypeFrameOrder": [
+    "Login and role entry",
+    "Department Home",
+    "Invoice Intake",
+    "AI Validation Review",
+    "AP Kanban Board",
+    "AP Ticket Detail",
+    "CFO Sign",
+    "Payment and Close",
+    "Agent Monitor",
+    "Reports Dashboard",
+    "AP Chat Assistant"
+  ]
+}

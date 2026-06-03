@@ -64,6 +64,40 @@ type TicketDetail = {
   parentTicketId: string | null;
   notes: string | null;
   childTickets: Array<{ id: string; title: string; amountPkr: string; status: string }>;
+  paymentMilestone: {
+    id: string;
+    label: string;
+    kind: string;
+    status: string;
+    amount: string;
+    percent: string | null;
+    releaseCondition: string | null;
+    requiredDocuments: string[];
+    paymentPlan: {
+      id: string;
+      planNumber: string;
+      planType: string;
+      status: string;
+      totalAmount: string;
+      paidAmount: string;
+      remainingAmount: string;
+      advancePercent: string | null;
+      releaseCondition: string | null;
+      requiredFinalDocuments: string[];
+      aiVerificationStatus: string;
+      aiVerificationScore: number;
+      aiVerificationNotes: string | null;
+      milestones: Array<{
+        id: string;
+        sequence: number;
+        label: string;
+        kind: string;
+        status: string;
+        amount: string;
+        ticket: { id: string; title: string; status: string; amountPkr: string } | null;
+      }>;
+    };
+  } | null;
   invoice: {
     id: string;
     reference: string | null;
@@ -309,6 +343,7 @@ const departmentStageFields: Record<string, string[]> = {
     'billType',
     'notes',
   ],
+  ADVANCE_PAID_REMAINING_PENDING: ['status', 'notes'],
   WAITING_FOR_DOCS: [
     'status',
     'title',
@@ -338,6 +373,10 @@ const pkr = new Intl.NumberFormat('en-PK', {
 
 function human(value: string) {
   return value.replaceAll('_', ' ').toLowerCase();
+}
+
+function displayPersonName(name: string | undefined | null) {
+  return name === 'AP Clerk' ? 'AP Finance' : name ?? 'System';
 }
 
 function labelForStatus(status: string, meta?: Meta) {
@@ -425,6 +464,14 @@ function apiErrorMessage(error: unknown) {
   return message ?? maybe.response?.data?.error ?? maybe.message ?? 'Request failed.';
 }
 
+function isPreviewableAttachment(attachment: TicketAttachment) {
+  return (
+    attachment.mimeType.startsWith('image/') ||
+    attachment.mimeType === 'application/pdf' ||
+    attachment.mimeType.startsWith('text/')
+  );
+}
+
 function editableFieldsFor(role: string | undefined, status: string) {
   if (status === 'PAYMENT_COMPLETE') return new Set<string>();
   if (role === 'COMPANY_ADMIN') return new Set(allTicketUpdateFields);
@@ -452,9 +499,10 @@ export function TicketDetailPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
   const [comment, setComment] = useState('');
-  const [approvalDecision, setApprovalDecision] = useState<'approved' | 'rejected' | null>(null);
+  const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState('');
   const scopeKey = user?.id ?? 'anonymous';
 
   const { data: ticket, isLoading, error } = useQuery({
@@ -487,9 +535,63 @@ export function TicketDetailPage() {
     if (ticket) setDraft(makeDraft(ticket));
   }, [ticket]);
 
+  const previewableAttachments = useMemo(
+    () => attachments.filter(isPreviewableAttachment),
+    [attachments],
+  );
+  const selectedPreviewAttachment = useMemo(() => {
+    if (!previewableAttachments.length) return null;
+    return (
+      previewableAttachments.find((attachment) => attachment.id === selectedPreviewId) ??
+      previewableAttachments.find((attachment) => attachment.documentType === 'INVOICE') ??
+      previewableAttachments[0]
+    );
+  }, [previewableAttachments, selectedPreviewId]);
+
   useEffect(() => {
-    setApprovalDecision(null);
-  }, [id]);
+    if (!previewableAttachments.length) {
+      setSelectedPreviewId(null);
+      return;
+    }
+    if (
+      !selectedPreviewId ||
+      !previewableAttachments.some((attachment) => attachment.id === selectedPreviewId)
+    ) {
+      const invoiceAttachment =
+        previewableAttachments.find((attachment) => attachment.documentType === 'INVOICE') ??
+        previewableAttachments[0];
+      setSelectedPreviewId(invoiceAttachment.id);
+    }
+  }, [previewableAttachments, selectedPreviewId]);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setPreviewUrl(null);
+    setPreviewError('');
+
+    if (!id || !selectedPreviewAttachment) return undefined;
+
+    api
+      .get<Blob>(
+        `/api/tickets/${id}/attachments/${selectedPreviewAttachment.id}/preview`,
+        { responseType: 'blob' },
+      )
+      .then(({ data }) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(data);
+        setPreviewUrl(objectUrl);
+      })
+      .catch((previewLoadError) => {
+        if (!active) return;
+        setPreviewError(apiErrorMessage(previewLoadError));
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id, selectedPreviewAttachment]);
 
   const update = useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
@@ -576,6 +678,9 @@ export function TicketDetailPage() {
       return data;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.invalidateQueries({ queryKey: ['ticket', id, scopeKey] });
       qc.invalidateQueries({ queryKey: ['ticket', id, 'attachments', scopeKey] });
       setAttachmentFile(null);
       setNotice({ type: 'success', message: 'Attachment uploaded successfully.' });
@@ -602,32 +707,6 @@ export function TicketDetailPage() {
     },
   });
 
-  const decideApproval = useMutation({
-    mutationFn: async (approved: boolean) => {
-      if (!ticket.invoice?.id) throw new Error('Invoice link is missing.');
-      const { data } = await api.post(`/api/approvals/${ticket.invoice.id}`, {
-        approved,
-        note: rejectReason || undefined,
-      });
-      return data;
-    },
-    onSuccess: (_data, approved) => {
-      setApprovalDecision(approved ? 'approved' : 'rejected');
-      qc.invalidateQueries({ queryKey: ['tickets'] });
-      qc.invalidateQueries({ queryKey: ['ticket', id, scopeKey] });
-      setNotice({
-        type: 'success',
-        message: approved
-          ? 'Request approved and released to finance.'
-          : 'Request rejected and returned to department.',
-      });
-      setRejectReason('');
-    },
-    onError: (mutationError) => {
-      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
-    },
-  });
-
   const totals = useMemo(() => {
     if (!ticket) return null;
     return [
@@ -638,7 +717,7 @@ export function TicketDetailPage() {
   }, [ticket]);
 
   if (!id) return <p className="error">Missing ticket id.</p>;
-  if (error && !approvalDecision) return <p className="error">Ticket could not be loaded.</p>;
+  if (error) return <p className="error">Ticket could not be loaded.</p>;
   if (isLoading || !ticket || !draft) return <p className="muted">Loading ticket...</p>;
 
   function field(name: keyof Draft, value: string | boolean) {
@@ -692,14 +771,13 @@ export function TicketDetailPage() {
       (isCompanyAdmin ||
         isAp ||
         (user?.role === 'DEPT_USER' &&
-          ['NEW_REQUEST', 'WAITING_FOR_DOCS'].includes(ticket.status)) ||
+          ['NEW_REQUEST', 'ADVANCE_PAID_REMAINING_PENDING', 'WAITING_FOR_DOCS'].includes(ticket.status)) ||
         (isCfo && ticket.status === 'CFO_SIGN_PENDING')),
   );
-  const canHeadApprove = Boolean(
-    user?.role === 'DEPT_ADMIN' &&
-      ticket.status === 'DEPARTMENT_HEAD_APPROVAL' &&
-      ticket.invoice?.id &&
-      approvalDecision === null,
+  const canSubmitRemainingProof = Boolean(
+    user?.role === 'DEPT_USER' &&
+      ticket.status === 'ADVANCE_PAID_REMAINING_PENDING' &&
+      canEdit('status'),
   );
 
   function fullPayload() {
@@ -833,7 +911,6 @@ export function TicketDetailPage() {
     !isClosed && canEdit('status') && (ticket.availableTransitions ?? []).length > 0,
   );
   const canAssign = Boolean(!isClosed && ticket.canAssign && meta?.canAssign && canEdit('assignedToId'));
-
   return (
     <div className="ticket-detail-page">
       <p>
@@ -870,57 +947,86 @@ export function TicketDetailPage() {
         </div>
       ) : null}
 
-      {approvalDecision ? (
-        <section className="ticket-panel ticket-cfo-panel">
-          <div>
-            <h3>Department head status</h3>
-            <p className="muted">
-              {approvalDecision === 'approved'
-                ? 'Approved. Request has been released to finance for AP processing.'
-                : 'Rejected. Request has been returned to department with the rejection reason.'}
-            </p>
+      {ticket.paymentMilestone ? (
+        <section className="ticket-panel ticket-wide-panel">
+          <div className="payment-plan-header">
+            <div>
+              <h3>Payment plan</h3>
+              <p className="muted">
+                {ticket.paymentMilestone.paymentPlan.planNumber} /{' '}
+                {human(ticket.paymentMilestone.paymentPlan.planType)} /{' '}
+                {human(ticket.paymentMilestone.paymentPlan.status)}
+              </p>
+            </div>
+            <span className="badge badge-indigo">
+              AI {human(ticket.paymentMilestone.paymentPlan.aiVerificationStatus)}{' '}
+              {ticket.paymentMilestone.paymentPlan.aiVerificationScore}%
+            </span>
           </div>
-          <span className={`badge ${approvalDecision === 'approved' ? 'badge-emerald' : 'badge-rose'}`}>
-            {approvalDecision === 'approved' ? 'Approved' : 'Rejected'}
-          </span>
+          <div className="payment-plan-totals">
+            <span>
+              <small>Total</small>
+              <strong>{money(ticket.paymentMilestone.paymentPlan.totalAmount)}</strong>
+            </span>
+            <span>
+              <small>Paid</small>
+              <strong>{money(ticket.paymentMilestone.paymentPlan.paidAmount)}</strong>
+            </span>
+            <span>
+              <small>Remaining</small>
+              <strong>{money(ticket.paymentMilestone.paymentPlan.remainingAmount)}</strong>
+            </span>
+          </div>
+          <div className="payment-milestone-list">
+            {ticket.paymentMilestone.paymentPlan.milestones.map((milestone) => (
+              <div
+                key={milestone.id}
+                className={
+                  milestone.id === ticket.paymentMilestone?.id
+                    ? 'payment-milestone-row payment-milestone-active'
+                    : 'payment-milestone-row'
+                }
+              >
+                <span>
+                  <strong>{milestone.label}</strong>
+                  <small>
+                    {human(milestone.kind)} / {human(milestone.status)}
+                  </small>
+                </span>
+                <strong>{money(milestone.amount)}</strong>
+                {milestone.ticket ? (
+                  <Link to={`/tickets/${milestone.ticket.id}`}>
+                    {human(milestone.ticket.status)}
+                  </Link>
+                ) : (
+                  <small>No ticket yet</small>
+                )}
+              </div>
+            ))}
+          </div>
+          {ticket.paymentMilestone.paymentPlan.aiVerificationNotes ? (
+            <p className="muted">{ticket.paymentMilestone.paymentPlan.aiVerificationNotes}</p>
+          ) : null}
         </section>
       ) : null}
 
-      {canHeadApprove ? (
+      {canSubmitRemainingProof ? (
         <section className="ticket-panel ticket-cfo-panel">
           <div>
-            <h3>Department head decision</h3>
+            <h3>Remaining payment proof</h3>
             <p className="muted">
-              Review the synced invoice and PO details. You can approve it for finance or reject it
-              with a reason for the department to fix.
+              Advance payment is complete. Upload GRN, delivery note, receipt, or final invoice proof,
+              then submit this remaining payment to AP finance.
             </p>
-            <div className="field">
-              <label htmlFor="rejectReason">Reject reason</label>
-              <textarea
-                id="rejectReason"
-                rows={2}
-                value={rejectReason}
-                onChange={(event) => setRejectReason(event.target.value)}
-                placeholder="Required if rejecting"
-              />
-            </div>
           </div>
           <div className="row-actions">
             <button
               type="button"
               className="btn btn-primary"
-              disabled={decideApproval.isPending}
-              onClick={() => decideApproval.mutate(true)}
+              disabled={update.isPending}
+              onClick={() => moveTicketStatus('DOCS_REVIEW')}
             >
-              Approve for finance
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger"
-              disabled={decideApproval.isPending || !rejectReason.trim()}
-              onClick={() => decideApproval.mutate(false)}
-            >
-              Reject
+              Submit remaining proof to finance
             </button>
           </div>
         </section>
@@ -1030,6 +1136,8 @@ export function TicketDetailPage() {
         </section>
       ) : null}
 
+      <div className="ticket-review-layout">
+        <div className="ticket-review-fields">
       <form className="ticket-edit-grid" onSubmit={onSubmit}>
         <section className="ticket-panel">
           <h3>Workflow</h3>
@@ -1067,7 +1175,7 @@ export function TicketDetailPage() {
               <option value="">Unassigned</option>
               {assignees.map((assignee) => (
                 <option key={assignee.id} value={assignee.id}>
-                  {assignee.name}
+                  {displayPersonName(assignee.name)}
                 </option>
               ))}
             </select>
@@ -1398,6 +1506,18 @@ export function TicketDetailPage() {
           </div>
         )}
       </form>
+        </div>
+
+        <InvoicePreviewPanel
+          attachments={attachments}
+          previewableAttachments={previewableAttachments}
+          selectedAttachment={selectedPreviewAttachment}
+          previewUrl={previewUrl}
+          previewError={previewError}
+          onSelect={setSelectedPreviewId}
+          onDownload={downloadAttachment}
+        />
+      </div>
 
       <section className="ticket-panel ticket-wide-panel">
         <div className="attachment-header">
@@ -1433,17 +1553,28 @@ export function TicketDetailPage() {
                   <strong>{attachment.fileName}</strong>
                   <small>
                     {human(attachment.documentType)} / {fileSizeText(attachment.fileSize)} /
-                    uploaded by {attachment.uploadedBy?.name ?? 'System'} on{' '}
+                    uploaded by {displayPersonName(attachment.uploadedBy?.name)} on{' '}
                     {dateText(attachment.uploadedAt)}
                   </small>
                 </span>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => downloadAttachment(attachment)}
-                >
-                  Download
-                </button>
+                <div className="row-actions">
+                  {isPreviewableAttachment(attachment) ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setSelectedPreviewId(attachment.id)}
+                    >
+                      Preview
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => downloadAttachment(attachment)}
+                  >
+                    Download
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -1500,7 +1631,7 @@ export function TicketDetailPage() {
                 <span>{activity.message}</span>
                 <small>
                   {activity.type === 'comment' ? 'Comment / ' : ''}
-                  {activity.actor?.name ?? 'System'} / {dateText(activity.createdAt)}
+                  {displayPersonName(activity.actor?.name)} / {dateText(activity.createdAt)}
                 </small>
               </div>
             ))
@@ -1510,6 +1641,111 @@ export function TicketDetailPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+function InvoicePreviewPanel({
+  attachments,
+  previewableAttachments,
+  selectedAttachment,
+  previewUrl,
+  previewError,
+  onSelect,
+  onDownload,
+}: {
+  attachments: TicketAttachment[];
+  previewableAttachments: TicketAttachment[];
+  selectedAttachment: TicketAttachment | null;
+  previewUrl: string | null;
+  previewError: string;
+  onSelect: (id: string) => void;
+  onDownload: (attachment: TicketAttachment) => void;
+}) {
+  const hasAttachments = attachments.length > 0;
+  const isImage = selectedAttachment?.mimeType.startsWith('image/');
+  const isPdf = selectedAttachment?.mimeType === 'application/pdf';
+  const isText = selectedAttachment?.mimeType.startsWith('text/');
+
+  return (
+    <aside className="ticket-panel invoice-preview-panel">
+      <div className="invoice-preview-header">
+        <div>
+          <p className="eyebrow">Uploaded invoice</p>
+          <h3>Side-by-side validation</h3>
+          <p className="muted">
+            Keep the source invoice open while validating filled AP fields.
+          </p>
+        </div>
+        {selectedAttachment ? (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onDownload(selectedAttachment)}
+          >
+            Download
+          </button>
+        ) : null}
+      </div>
+
+      {previewableAttachments.length ? (
+        <div className="preview-selector" aria-label="Select attachment preview">
+          {previewableAttachments.map((attachment) => (
+            <button
+              type="button"
+              key={attachment.id}
+              className={
+                selectedAttachment?.id === attachment.id
+                  ? 'preview-chip preview-chip-active'
+                  : 'preview-chip'
+              }
+              onClick={() => onSelect(attachment.id)}
+            >
+              <span>{attachment.documentType.replaceAll('_', ' ').toLowerCase()}</span>
+              <strong>{attachment.fileName}</strong>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="invoice-preview-frame">
+        {!hasAttachments ? (
+          <p className="empty-state">No uploaded invoice or supporting file is attached yet.</p>
+        ) : previewError ? (
+          <p className="empty-state">{previewError}</p>
+        ) : !selectedAttachment ? (
+          <p className="empty-state">
+            Attach an image, PDF, or text invoice to preview it here.
+          </p>
+        ) : !previewUrl ? (
+          <p className="empty-state">Loading preview...</p>
+        ) : isImage ? (
+          <img src={previewUrl} alt={selectedAttachment.fileName} />
+        ) : isPdf || isText ? (
+          <iframe title={selectedAttachment.fileName} src={previewUrl} />
+        ) : (
+          <p className="empty-state">
+            Preview is not supported for this file type. Use download for this attachment.
+          </p>
+        )}
+      </div>
+
+      {selectedAttachment ? (
+        <div className="invoice-preview-meta">
+          <span>
+            <small>File</small>
+            <strong>{selectedAttachment.fileName}</strong>
+          </span>
+          <span>
+            <small>Type</small>
+            <strong>{human(selectedAttachment.documentType)}</strong>
+          </span>
+          <span>
+            <small>Size</small>
+            <strong>{fileSizeText(selectedAttachment.fileSize)}</strong>
+          </span>
+        </div>
+      ) : null}
+    </aside>
   );
 }
 

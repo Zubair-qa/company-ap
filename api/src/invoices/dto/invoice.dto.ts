@@ -1,6 +1,6 @@
-import { IsEnum, IsOptional, IsString, IsNumber, Min } from 'class-validator';
+import { IsArray, IsEnum, IsOptional, IsString, IsNumber, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { VendorKind } from '@prisma/client';
+import { PaymentPlanType, VendorKind } from '@prisma/client';
 
 export class CreateVendorBodyDto {
   @IsString()
@@ -88,6 +88,26 @@ export class PatchInvoiceDto {
   @IsNumber()
   @Min(0)
   totalAmount?: number;
+
+  @IsOptional()
+  @IsEnum(PaymentPlanType)
+  paymentPlanType?: PaymentPlanType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(99)
+  advancePercent?: number;
+
+  @IsOptional()
+  @IsString()
+  releaseCondition?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  requiredFinalDocuments?: string[];
 }
 
 export class GoogleCsvDto {

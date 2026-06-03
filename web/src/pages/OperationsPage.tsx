@@ -572,7 +572,7 @@ export function OperationsPage() {
               >
                 <option value="DEPT_USER">Department user</option>
                 <option value="DEPT_ADMIN">Department head</option>
-                <option value="AP_CLERK">AP clerk</option>
+                <option value="AP_CLERK">AP Finance</option>
                 <option value="CFO">CFO</option>
                 <option value="COMPANY_ADMIN">Company admin</option>
               </select>

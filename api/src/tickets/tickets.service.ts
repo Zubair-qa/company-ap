@@ -64,7 +64,7 @@ const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
   [TicketStatus.VOUCHER_GENERATION]: 'Voucher generation',
   [TicketStatus.XERO_BILL_ENTRY]: 'Xero bill entry',
   [TicketStatus.PAYMENT_PREPARATION]: 'Payment preparation',
-  [TicketStatus.BANK_UPLOAD]: 'Bank upload',
+  [TicketStatus.BANK_UPLOAD]: 'AP finance final review',
   [TicketStatus.CFO_SIGN_PENDING]: 'CFO sign pending',
   [TicketStatus.BANK_EXECUTION_PENDING]: 'Bank execution pending',
   [TicketStatus.BANK_EXECUTED]: 'Bank executed',
@@ -77,8 +77,13 @@ export const TICKET_BOARD_COLUMNS = [
   {
     id: 'submission',
     label: 'Department draft / rework',
-    scope: 'Department creates invoice and fixes rejected requests.',
-    statuses: [TicketStatus.NEW_REQUEST],
+    scope: 'Department creates invoice packs and fixes AI/AP proof requests before finance release.',
+    statuses: [
+      TicketStatus.NEW_REQUEST,
+      TicketStatus.MISSING_DOCS,
+      TicketStatus.REQUESTER_PINGED,
+      TicketStatus.WAITING_FOR_DOCS,
+    ],
   },
   {
     id: 'remaining_payment_pending',
@@ -88,40 +93,33 @@ export const TICKET_BOARD_COLUMNS = [
   },
   {
     id: 'department_verification',
-    label: 'Department verification',
-    scope: 'Finance reviews documents; missing docs go back to requester.',
-    statuses: [
-      TicketStatus.DOCS_REVIEW,
-      TicketStatus.MISSING_DOCS,
-      TicketStatus.REQUESTER_PINGED,
-      TicketStatus.WAITING_FOR_DOCS,
-    ],
+    label: 'AI document verification',
+    scope: 'Agent checks invoice, PO, GRN/receipt, and required proof before AP sees the ticket.',
+    statuses: [TicketStatus.DOCS_REVIEW],
   },
   {
     id: 'data_verification',
-    label: 'Data verification',
-    scope: 'Vendor, PO, account number, old sheet reference, and invoice data are checked.',
-    statuses: [TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION],
+    label: 'AI data verification',
+    scope: 'Agent verifies vendor, PO, account evidence, invoice reference, amount, WHT readiness, and voucher readiness.',
+    statuses: [
+      TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION,
+      TicketStatus.WHT_CALCULATION,
+      TicketStatus.VOUCHER_GENERATION,
+      TicketStatus.XERO_BILL_ENTRY,
+      TicketStatus.PAYMENT_PREPARATION,
+    ],
   },
   {
-    id: 'tax_voucher',
-    label: 'WHT and voucher',
-    scope: 'Filer/non-filer WHT is calculated and payment voucher is generated.',
-    statuses: [TicketStatus.WHT_CALCULATION, TicketStatus.VOUCHER_GENERATION],
-  },
-  {
-    id: 'xero_bookkeeping',
-    label: 'Xero bookkeeping',
-    scope: 'AP bill is entered/synced to Xero before payment processing.',
-    statuses: [TicketStatus.XERO_BILL_ENTRY],
+    id: 'ap_finance_final_review',
+    label: 'AP finance final review',
+    scope: 'AP finance performs one human check, requests proof in comments if needed, or sends to CFO sign.',
+    statuses: [TicketStatus.BANK_UPLOAD],
   },
   {
     id: 'payment_disbursement',
-    label: 'Payment disbursement',
-    scope: 'Payment file is prepared, uploaded to Meezan, signed by CFO, and executed.',
+    label: 'CFO and bank execution',
+    scope: 'CFO signs the prepared payment and AP confirms payment gateway/bank execution.',
     statuses: [
-      TicketStatus.PAYMENT_PREPARATION,
-      TicketStatus.BANK_UPLOAD,
       TicketStatus.CFO_SIGN_PENDING,
       TicketStatus.BANK_EXECUTION_PENDING,
       TicketStatus.BANK_EXECUTED,
@@ -155,7 +153,7 @@ const STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   [TicketStatus.VOUCHER_GENERATION]: [TicketStatus.XERO_BILL_ENTRY],
   [TicketStatus.XERO_BILL_ENTRY]: [TicketStatus.PAYMENT_PREPARATION],
   [TicketStatus.PAYMENT_PREPARATION]: [TicketStatus.BANK_UPLOAD],
-  [TicketStatus.BANK_UPLOAD]: [TicketStatus.CFO_SIGN_PENDING],
+  [TicketStatus.BANK_UPLOAD]: [TicketStatus.CFO_SIGN_PENDING, TicketStatus.WAITING_FOR_DOCS],
   [TicketStatus.CFO_SIGN_PENDING]: [TicketStatus.BANK_EXECUTION_PENDING],
   [TicketStatus.BANK_EXECUTION_PENDING]: [TicketStatus.BANK_EXECUTED],
   [TicketStatus.BANK_EXECUTED]: [TicketStatus.MARKED_PAID_IN_XERO],
@@ -165,26 +163,10 @@ const STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
 };
 
 const ROLE_STATUS_PERMISSIONS: Record<Role, Partial<Record<TicketStatus, TicketStatus[]>>> = {
-  [Role.DEPT_USER]: {
-    [TicketStatus.NEW_REQUEST]: [TicketStatus.DOCS_REVIEW],
-    [TicketStatus.ADVANCE_PAID_REMAINING_PENDING]: [TicketStatus.DOCS_REVIEW],
-    [TicketStatus.WAITING_FOR_DOCS]: [TicketStatus.DOCS_REVIEW],
-  },
+  [Role.DEPT_USER]: {},
   [Role.DEPT_ADMIN]: {},
   [Role.AP_CLERK]: {
-    [TicketStatus.DOCS_REVIEW]: [
-      TicketStatus.MISSING_DOCS,
-      TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION,
-    ],
-    [TicketStatus.MISSING_DOCS]: [TicketStatus.REQUESTER_PINGED],
-    [TicketStatus.REQUESTER_PINGED]: [TicketStatus.WAITING_FOR_DOCS],
-    [TicketStatus.WAITING_FOR_DOCS]: [TicketStatus.DOCS_REVIEW],
-    [TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION]: [TicketStatus.WHT_CALCULATION],
-    [TicketStatus.WHT_CALCULATION]: [TicketStatus.VOUCHER_GENERATION],
-    [TicketStatus.VOUCHER_GENERATION]: [TicketStatus.XERO_BILL_ENTRY],
-    [TicketStatus.XERO_BILL_ENTRY]: [TicketStatus.PAYMENT_PREPARATION],
-    [TicketStatus.PAYMENT_PREPARATION]: [TicketStatus.BANK_UPLOAD],
-    [TicketStatus.BANK_UPLOAD]: [TicketStatus.CFO_SIGN_PENDING],
+    [TicketStatus.BANK_UPLOAD]: [TicketStatus.CFO_SIGN_PENDING, TicketStatus.WAITING_FOR_DOCS],
     [TicketStatus.BANK_EXECUTION_PENDING]: [TicketStatus.BANK_EXECUTED],
     [TicketStatus.BANK_EXECUTED]: [TicketStatus.MARKED_PAID_IN_XERO],
     [TicketStatus.MARKED_PAID_IN_XERO]: [TicketStatus.REQUESTER_NOTIFIED],
@@ -245,35 +227,30 @@ const ALL_TICKET_UPDATE_FIELDS = [
 
 const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
   [TicketStatus.DOCS_REVIEW]: [
-    'status',
     'assignedToId',
     'documentStatus',
     'missingDocuments',
     'notes',
   ],
   [TicketStatus.MISSING_DOCS]: [
-    'status',
     'assignedToId',
     'documentStatus',
     'missingDocuments',
     'notes',
   ],
   [TicketStatus.REQUESTER_PINGED]: [
-    'status',
     'assignedToId',
     'documentStatus',
     'missingDocuments',
     'notes',
   ],
   [TicketStatus.WAITING_FOR_DOCS]: [
-    'status',
     'assignedToId',
     'documentStatus',
     'missingDocuments',
     'notes',
   ],
   [TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION]: [
-    'status',
     'assignedToId',
     'vendorId',
     'vendorNameSnapshot',
@@ -293,20 +270,17 @@ const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
     'notes',
   ],
   [TicketStatus.WHT_CALCULATION]: [
-    'status',
     'assignedToId',
     'whtFilerStatus',
     'whtRate',
     'notes',
   ],
   [TicketStatus.VOUCHER_GENERATION]: [
-    'status',
     'assignedToId',
     'voucherNumber',
     'notes',
   ],
   [TicketStatus.XERO_BILL_ENTRY]: [
-    'status',
     'assignedToId',
     'xeroSyncStatus',
     'xeroContactId',
@@ -316,7 +290,6 @@ const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
     'notes',
   ],
   [TicketStatus.PAYMENT_PREPARATION]: [
-    'status',
     'assignedToId',
     'paymentMethod',
     'bankPaymentStatus',
@@ -349,7 +322,6 @@ const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
 
 const DEPARTMENT_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
   [TicketStatus.NEW_REQUEST]: [
-    'status',
     'title',
     'priority',
     'requesterName',
@@ -361,25 +333,84 @@ const DEPARTMENT_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> 
     'internalReference',
     'amountPkr',
     'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
     'expenseNature',
     'billType',
     'notes',
   ],
-  [TicketStatus.ADVANCE_PAID_REMAINING_PENDING]: [
-    'status',
-    'notes',
-  ],
-  [TicketStatus.WAITING_FOR_DOCS]: [
-    'status',
+  [TicketStatus.MISSING_DOCS]: [
     'title',
     'requesterName',
     'requesterEmail',
+    'vendorId',
     'vendorNameSnapshot',
     'purchaseOrderNumber',
     'invoiceNumber',
     'internalReference',
     'amountPkr',
     'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'expenseNature',
+    'billType',
+    'notes',
+  ],
+  [TicketStatus.REQUESTER_PINGED]: [
+    'title',
+    'requesterName',
+    'requesterEmail',
+    'vendorId',
+    'vendorNameSnapshot',
+    'purchaseOrderNumber',
+    'invoiceNumber',
+    'internalReference',
+    'amountPkr',
+    'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'expenseNature',
+    'billType',
+    'notes',
+  ],
+  [TicketStatus.ADVANCE_PAID_REMAINING_PENDING]: [
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'notes',
+  ],
+  [TicketStatus.WAITING_FOR_DOCS]: [
+    'title',
+    'requesterName',
+    'requesterEmail',
+    'vendorId',
+    'vendorNameSnapshot',
+    'purchaseOrderNumber',
+    'invoiceNumber',
+    'internalReference',
+    'amountPkr',
+    'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
     'expenseNature',
     'billType',
     'notes',
@@ -1415,6 +1446,10 @@ export class TicketsService {
       await this.handleMilestonePaymentComplete(updated.id, user.id);
       return this.getOne(updated.id, user);
     }
+    if (this.shouldRunWorkflowAgentAfterUpdate(existing.status, user, dto, statusChanged)) {
+      const agentResult = await this.runWorkflowAgent(updated.id, user);
+      return agentResult.ticket;
+    }
     return this.decorateTicket(updated, user);
   }
 
@@ -1522,16 +1557,7 @@ export class TicketsService {
   }
 
   async submitToFinance(id: string, user: RequestUser) {
-    const now = new Date();
-    return this.update(
-      id,
-      {
-        status: TicketStatus.DOCS_REVIEW,
-        submittedToFinanceAt: now.toISOString(),
-        dueDate: calculateFinanceDueDate(now).toISOString(),
-      },
-      user,
-    );
+    return this.runWorkflowAgent(id, user);
   }
 
   async runWorkflowAgent(id: string, user: RequestUser, depth = 0): Promise<WorkflowAgentResult> {
@@ -1567,6 +1593,7 @@ export class TicketsService {
     const data: Prisma.PaymentTicketUpdateInput = {};
     const checks: string[] = [];
     const missingDocuments = this.requiredDocumentGaps(ticket);
+    const submissionGaps = this.agentSubmissionGaps(ticket);
     let summary = 'Agent checked the ticket and no automatic movement was required.';
     let humanRequired: string | null = null;
     let confidence = 82;
@@ -1578,61 +1605,103 @@ export class TicketsService {
 
     if (
       ticket.status === TicketStatus.NEW_REQUEST ||
+      ticket.status === TicketStatus.MISSING_DOCS ||
+      ticket.status === TicketStatus.REQUESTER_PINGED ||
       ticket.status === TicketStatus.WAITING_FOR_DOCS ||
       ticket.status === TicketStatus.ADVANCE_PAID_REMAINING_PENDING
     ) {
-      if (ticket.status === TicketStatus.ADVANCE_PAID_REMAINING_PENDING && !missingDocuments.length) {
+      if (ticket.status === TicketStatus.ADVANCE_PAID_REMAINING_PENDING && !submissionGaps.length) {
         await this.assertRemainingPaymentReady(id, user);
       }
 
-      if (missingDocuments.length) {
+      if (submissionGaps.length) {
         data.documentStatus = DocumentStatus.INCOMPLETE;
-        data.missingDocuments = missingDocuments;
+        data.missingDocuments = submissionGaps;
         setStatus(TicketStatus.WAITING_FOR_DOCS);
-        summary = 'Agent found missing documents and kept the request with department for correction.';
+        data.submittedToFinanceAt = null;
+        data.dueDate = null;
+        summary =
+          'Agent found missing documents/data and kept the request in department draft/rework for correction.';
         confidence = 74;
       } else {
         const now = new Date();
+        Object.assign(
+          data,
+          this.whtData(
+            ticket.amountPkr,
+            ticket.whtFilerStatus,
+            ticket.whtRate == null ? undefined : Number(ticket.whtRate),
+          ),
+        );
         data.documentStatus = DocumentStatus.COMPLETE;
         data.missingDocuments = [];
         data.submittedToFinanceAt = now;
         data.dueDate = calculateFinanceDueDate(now);
-        setStatus(TicketStatus.DOCS_REVIEW);
-        summary = 'Agent verified department documents and released the ticket to AP finance.';
-        confidence = 94;
+        data.purchaseOrderVerified = ticket.purchaseOrderRequired ? true : ticket.purchaseOrderVerified;
+        data.accountVerificationStatus = this.agentAccountVerificationStatus(ticket);
+        data.accountVerificationSource =
+          ticket.accountVerificationSource ??
+          'Agent verified account evidence from invoice fields, vendor data, or legacy reference.';
+        data.voucherNumber = ticket.voucherNumber ?? `VCH-${Date.now()}`;
+        data.voucherGeneratedAt = ticket.voucherGeneratedAt ?? now;
+        data.xeroSyncStatus =
+          ticket.xeroSyncStatus === XeroSyncStatus.BILL_CREATED
+            ? XeroSyncStatus.BILL_CREATED
+            : XeroSyncStatus.READY_TO_SYNC;
+        data.bankPaymentStatus = BankPaymentStatus.READY_FOR_UPLOAD;
+        setStatus(TicketStatus.BANK_UPLOAD);
+        summary =
+          'Agent verified documents/data, prepared tax/voucher/payment readiness, and released the ticket to AP finance final review.';
+        confidence = 95;
       }
-      checks.push('Document completeness', 'Department scope', 'Finance due date rule');
+      checks.push(
+        'Document completeness',
+        'Vendor details',
+        'PO/invoice reference',
+        'Account evidence',
+        'Amount validation',
+        'Finance due date rule',
+      );
     } else if (user.role === Role.AP_CLERK || user.role === Role.COMPANY_ADMIN) {
       switch (ticket.status) {
         case TicketStatus.DOCS_REVIEW:
           checks.push('Invoice/PO attachments', 'Missing document list');
-          if (missingDocuments.length || ticket.documentStatus === DocumentStatus.INCOMPLETE) {
+          if (submissionGaps.length || ticket.documentStatus === DocumentStatus.INCOMPLETE) {
             data.documentStatus = DocumentStatus.INCOMPLETE;
-            data.missingDocuments = missingDocuments.length ? missingDocuments : ticket.missingDocuments;
-            setStatus(TicketStatus.MISSING_DOCS);
-            summary = 'Agent found incomplete supporting documents and moved the ticket to missing docs.';
+            data.missingDocuments = submissionGaps.length ? submissionGaps : ticket.missingDocuments;
+            setStatus(TicketStatus.WAITING_FOR_DOCS);
+            summary =
+              'Agent found incomplete supporting evidence and returned the ticket to department draft/rework.';
             confidence = 78;
           } else {
+            const now = new Date();
+            Object.assign(
+              data,
+              this.whtData(
+                ticket.amountPkr,
+                ticket.whtFilerStatus,
+                ticket.whtRate == null ? undefined : Number(ticket.whtRate),
+              ),
+            );
             data.documentStatus = DocumentStatus.COMPLETE;
             data.missingDocuments = [];
-            setStatus(TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION);
-            summary = 'Agent verified documents and moved the ticket to vendor/PO/account verification.';
-            confidence = 92;
+            data.purchaseOrderVerified = ticket.purchaseOrderRequired ? true : ticket.purchaseOrderVerified;
+            data.accountVerificationStatus = this.agentAccountVerificationStatus(ticket);
+            data.accountVerificationSource =
+              ticket.accountVerificationSource ??
+              'Agent verified account evidence from invoice fields, vendor data, or legacy reference.';
+            data.voucherNumber = ticket.voucherNumber ?? `VCH-${Date.now()}`;
+            data.voucherGeneratedAt = ticket.voucherGeneratedAt ?? now;
+            data.xeroSyncStatus =
+              ticket.xeroSyncStatus === XeroSyncStatus.BILL_CREATED
+                ? XeroSyncStatus.BILL_CREATED
+                : XeroSyncStatus.READY_TO_SYNC;
+            data.bankPaymentStatus = BankPaymentStatus.READY_FOR_UPLOAD;
+            setStatus(TicketStatus.BANK_UPLOAD);
+            summary =
+              'Agent verified documents/data and released the ticket to AP finance final review.';
+            confidence = 94;
           }
-          break;
-
-        case TicketStatus.MISSING_DOCS:
-          setStatus(TicketStatus.REQUESTER_PINGED);
-          summary = 'Agent prepared the requester follow-up and moved the ticket to requester pinged.';
-          checks.push('Missing document reason');
-          confidence = 86;
-          break;
-
-        case TicketStatus.REQUESTER_PINGED:
-          setStatus(TicketStatus.WAITING_FOR_DOCS);
-          summary = 'Agent moved the ticket to waiting for department documents.';
-          checks.push('Requester follow-up logged');
-          confidence = 86;
           break;
 
         case TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION: {
@@ -1654,18 +1723,42 @@ export class TicketsService {
           if (gaps.length) {
             data.documentStatus = DocumentStatus.INCOMPLETE;
             data.missingDocuments = gaps;
-            summary = `Agent stopped for manual correction: ${gaps.join(', ')}.`;
-            humanRequired = 'AP finance must correct vendor, PO, invoice, or account details.';
+            setStatus(TicketStatus.WAITING_FOR_DOCS);
+            summary = `Agent returned the ticket to department rework: ${gaps.join(', ')}.`;
             confidence = 68;
           } else {
+            const now = new Date();
             data.documentStatus = DocumentStatus.COMPLETE;
             data.missingDocuments = [];
-            setStatus(TicketStatus.WHT_CALCULATION);
-            summary = 'Agent verified vendor, PO, and account details and moved to WHT calculation.';
-            confidence = 91;
+            Object.assign(
+              data,
+              this.whtData(
+                ticket.amountPkr,
+                ticket.whtFilerStatus,
+                ticket.whtRate == null ? undefined : Number(ticket.whtRate),
+              ),
+            );
+            data.voucherNumber = ticket.voucherNumber ?? `VCH-${Date.now()}`;
+            data.voucherGeneratedAt = ticket.voucherGeneratedAt ?? now;
+            data.xeroSyncStatus =
+              ticket.xeroSyncStatus === XeroSyncStatus.BILL_CREATED
+                ? XeroSyncStatus.BILL_CREATED
+                : XeroSyncStatus.READY_TO_SYNC;
+            data.bankPaymentStatus = BankPaymentStatus.READY_FOR_UPLOAD;
+            setStatus(TicketStatus.BANK_UPLOAD);
+            summary = 'Agent verified vendor, PO, account, tax, and voucher readiness for AP final review.';
+            confidence = 93;
           }
           break;
         }
+
+        case TicketStatus.BANK_UPLOAD:
+          checks.push('AP final human review');
+          humanRequired =
+            'AP finance must perform the final human check, request proof in comments if needed, or send the prepared payment to CFO sign.';
+          summary = 'Agent stopped at AP finance final review before CFO authorization.';
+          confidence = 72;
+          break;
 
         case TicketStatus.WHT_CALCULATION:
           checks.push('Filer status', 'WHT rate', 'Net payable');
@@ -1722,19 +1815,6 @@ export class TicketsService {
             setStatus(TicketStatus.BANK_UPLOAD);
             summary = 'Agent prepared the payment record and moved it to bank upload.';
             confidence = 85;
-          }
-          break;
-
-        case TicketStatus.BANK_UPLOAD:
-          checks.push('Bank upload confirmation');
-          if (ticket.bankPaymentStatus === BankPaymentStatus.UPLOADED) {
-            setStatus(TicketStatus.CFO_SIGN_PENDING);
-            summary = 'Agent detected bank upload and moved the ticket to CFO sign pending.';
-            confidence = 84;
-          } else {
-            summary = 'Agent stopped at bank upload because payment has not been uploaded yet.';
-            humanRequired = 'AP finance must upload the payment file to the bank/payment gateway.';
-            confidence = 58;
           }
           break;
 
@@ -1803,13 +1883,19 @@ export class TicketsService {
       await this.handleMilestonePaymentComplete(updated.id, user.id);
     }
 
+    const decisionMissingDocuments = Array.isArray(data.missingDocuments)
+      ? data.missingDocuments
+      : submissionGaps.length
+        ? submissionGaps
+        : missingDocuments;
+
     const decision = {
       fromStatus,
       toStatus,
       summary,
       confidence,
       checks,
-      missingDocuments,
+      missingDocuments: decisionMissingDocuments,
       humanRequired,
     };
 
@@ -1827,7 +1913,7 @@ export class TicketsService {
           confidence: Math.min(confidence, next.decision.confidence),
           checks: Array.from(new Set([...checks, ...next.decision.checks])),
           missingDocuments: Array.from(
-            new Set([...missingDocuments, ...next.decision.missingDocuments]),
+            new Set([...decisionMissingDocuments, ...next.decision.missingDocuments]),
           ),
           humanRequired: next.decision.humanRequired,
         },
@@ -1837,14 +1923,19 @@ export class TicketsService {
 
     return {
       decision,
-      ticket: await this.getOne(id, user),
+      ticket: this.decorateTicket(updated, user),
     };
   }
 
   async listAttachments(id: string, user: RequestUser) {
-    await this.assertTicketVisible(id, user);
+    const ticket = await this.assertTicketVisible(id, user);
     const docs = await this.prisma.supportingDocument.findMany({
-      where: { ticketId: id },
+      where: {
+        OR: [
+          { ticketId: id },
+          ...(ticket.invoiceId ? [{ invoiceId: ticket.invoiceId }] : []),
+        ],
+      },
       include: attachmentInclude,
       orderBy: { uploadedAt: 'desc' },
     });
@@ -1910,9 +2001,15 @@ export class TicketsService {
     attachmentId: string,
     user: RequestUser,
   ) {
-    await this.assertTicketVisible(ticketId, user);
+    const ticket = await this.assertTicketVisible(ticketId, user);
     const doc = await this.prisma.supportingDocument.findFirst({
-      where: { id: attachmentId, ticketId },
+      where: {
+        id: attachmentId,
+        OR: [
+          { ticketId },
+          ...(ticket.invoiceId ? [{ invoiceId: ticket.invoiceId }] : []),
+        ],
+      },
       include: attachmentInclude,
     });
     if (!doc) throw new NotFoundException();
@@ -2182,22 +2279,11 @@ export class TicketsService {
       TicketStatus.REQUESTER_NOTIFIED,
       TicketStatus.PAYMENT_COMPLETE,
     ];
-    if (user.role === Role.DEPT_USER) {
+    if (user.role === Role.DEPT_USER || user.role === Role.DEPT_ADMIN) {
       if (!user.departmentId) return { id: '__no_department__' };
       return {
         departmentId: user.departmentId,
-        status: {
-          in: [
-            TicketStatus.NEW_REQUEST,
-            TicketStatus.ADVANCE_PAID_REMAINING_PENDING,
-            TicketStatus.WAITING_FOR_DOCS,
-          ],
-        },
       };
-    }
-    if (user.role === Role.DEPT_ADMIN) {
-      if (!user.departmentId) return { id: '__no_department__' };
-      return { id: '__department_head_scope_removed__' };
     }
     if (user.role === Role.CFO) {
       return {
@@ -2232,7 +2318,7 @@ export class TicketsService {
   private async assertTicketVisible(id: string, user: RequestUser) {
     const ticket = await this.prisma.paymentTicket.findFirst({
       where: { id, ...this.accessWhere(user) },
-      select: { id: true, status: true, departmentId: true },
+      select: { id: true, status: true, departmentId: true, invoiceId: true },
     });
     if (!ticket) throw new NotFoundException();
     return ticket;
@@ -2246,6 +2332,8 @@ export class TicketsService {
     if (
       user.role === Role.DEPT_USER &&
       (status === TicketStatus.NEW_REQUEST ||
+        status === TicketStatus.MISSING_DOCS ||
+        status === TicketStatus.REQUESTER_PINGED ||
         status === TicketStatus.ADVANCE_PAID_REMAINING_PENDING ||
         status === TicketStatus.WAITING_FOR_DOCS)
     ) {
@@ -2253,6 +2341,41 @@ export class TicketsService {
     }
     if (user.role === Role.CFO && status === TicketStatus.CFO_SIGN_PENDING) return;
     throw new ForbiddenException('You cannot upload attachments at this ticket stage');
+  }
+
+  private shouldRunWorkflowAgentAfterUpdate(
+    status: TicketStatus,
+    user: RequestUser,
+    dto: UpdateTicketDto,
+    statusChanged: boolean,
+  ) {
+    if (statusChanged || dto.status !== undefined || user.role === Role.CFO) {
+      return false;
+    }
+
+    const departmentAgentStatuses: TicketStatus[] = [
+      TicketStatus.NEW_REQUEST,
+      TicketStatus.MISSING_DOCS,
+      TicketStatus.REQUESTER_PINGED,
+      TicketStatus.WAITING_FOR_DOCS,
+      TicketStatus.ADVANCE_PAID_REMAINING_PENDING,
+    ];
+    const financeAgentStatuses: TicketStatus[] = [
+      TicketStatus.DOCS_REVIEW,
+      TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION,
+      TicketStatus.WHT_CALCULATION,
+      TicketStatus.VOUCHER_GENERATION,
+      TicketStatus.XERO_BILL_ENTRY,
+      TicketStatus.PAYMENT_PREPARATION,
+    ];
+
+    if (user.role === Role.DEPT_USER) {
+      return departmentAgentStatuses.includes(status);
+    }
+    if (user.role === Role.AP_CLERK || user.role === Role.COMPANY_ADMIN) {
+      return financeAgentStatuses.includes(status);
+    }
+    return false;
   }
 
   private async runDocumentAgentAfterAttachment(
@@ -2263,6 +2386,8 @@ export class TicketsService {
     if (user.role === Role.CFO) return;
     const documentAgentStatuses: TicketStatus[] = [
       TicketStatus.NEW_REQUEST,
+      TicketStatus.MISSING_DOCS,
+      TicketStatus.REQUESTER_PINGED,
       TicketStatus.WAITING_FOR_DOCS,
       TicketStatus.ADVANCE_PAID_REMAINING_PENDING,
     ];
@@ -2308,13 +2433,80 @@ export class TicketsService {
       TicketStatus.VOUCHER_GENERATION,
       TicketStatus.XERO_BILL_ENTRY,
       TicketStatus.PAYMENT_PREPARATION,
-      TicketStatus.BANK_UPLOAD,
       TicketStatus.BANK_EXECUTED,
       TicketStatus.MARKED_PAID_IN_XERO,
       TicketStatus.REQUESTER_NOTIFIED,
     ];
 
     return autoContinueStatuses.includes(status);
+  }
+
+  private agentSubmissionGaps(ticket: {
+    status: TicketStatus;
+    billType: BillType;
+    purchaseOrderRequired: boolean;
+    purchaseOrderNumber: string | null;
+    vendorId: string | null;
+    vendorNameSnapshot: string | null;
+    invoiceNumber: string | null;
+    internalReference: string | null;
+    amountPkr: Prisma.Decimal;
+    vendorAccountNumber: string | null;
+    invoiceAccountNumber: string | null;
+    legacySheetRowId: string | null;
+    oldReference: string | null;
+    attachments: Array<{ documentType: DocumentType }>;
+  }) {
+    const gaps = [...this.requiredDocumentGaps(ticket)];
+    if (!ticket.vendorId && !ticket.vendorNameSnapshot) {
+      gaps.push('Vendor details');
+    }
+    if (!ticket.invoiceNumber && !ticket.internalReference) {
+      gaps.push('Invoice number or internal reference');
+    }
+    if (ticket.amountPkr.lte(0)) {
+      gaps.push('Positive invoice amount');
+    }
+
+    const hasAccountEvidence =
+      Boolean(ticket.vendorAccountNumber) ||
+      Boolean(ticket.invoiceAccountNumber) ||
+      Boolean(ticket.legacySheetRowId) ||
+      Boolean(ticket.oldReference);
+    if (!hasAccountEvidence) {
+      gaps.push('Vendor account number or legacy sheet account proof');
+    }
+    if (
+      ticket.vendorAccountNumber &&
+      ticket.invoiceAccountNumber &&
+      ticket.vendorAccountNumber.trim() !== ticket.invoiceAccountNumber.trim()
+    ) {
+      gaps.push('Vendor and invoice account numbers must match');
+    }
+
+    return Array.from(new Set(gaps));
+  }
+
+  private agentAccountVerificationStatus(ticket: {
+    vendorAccountNumber: string | null;
+    invoiceAccountNumber: string | null;
+    legacySheetRowId: string | null;
+    oldReference: string | null;
+    accountVerificationStatus: AccountVerificationStatus;
+  }) {
+    if (
+      ticket.vendorAccountNumber &&
+      ticket.invoiceAccountNumber &&
+      ticket.vendorAccountNumber.trim() === ticket.invoiceAccountNumber.trim()
+    ) {
+      return AccountVerificationStatus.MATCHED;
+    }
+    if (ticket.legacySheetRowId || ticket.oldReference) {
+      return AccountVerificationStatus.INVOICE_MISSING_VERIFIED_FROM_SHEET;
+    }
+    return ticket.accountVerificationStatus === AccountVerificationStatus.MATCHED
+      ? ticket.accountVerificationStatus
+      : AccountVerificationStatus.NEEDS_MANUAL_REVIEW;
   }
 
   private requiredDocumentGaps(ticket: {
@@ -2428,6 +2620,14 @@ export class TicketsService {
   ) {
     if (status === TicketStatus.CFO_SIGN_PENDING) {
       data.bankPaymentStatus = BankPaymentStatus.UPLOADED;
+    }
+    if (status === TicketStatus.WAITING_FOR_DOCS) {
+      data.documentStatus = DocumentStatus.INCOMPLETE;
+      data.submittedToFinanceAt = null;
+      data.dueDate = null;
+      if (data.missingDocuments === undefined) {
+        data.missingDocuments = ['Additional proof requested in comments'];
+      }
     }
     if (status === TicketStatus.BANK_EXECUTION_PENDING) {
       data.bankPaymentStatus = BankPaymentStatus.CFO_SIGNED;

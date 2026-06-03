@@ -38,6 +38,17 @@ function ticketAttachmentDir() {
   return dir;
 }
 
+function previewMimeType(fileName: string, mimeType: string | null | undefined) {
+  const lower = fileName.toLowerCase();
+  if (/\.(jpe?g)$/.test(lower)) return 'image/jpeg';
+  if (/\.png$/.test(lower)) return 'image/png';
+  if (/\.webp$/.test(lower)) return 'image/webp';
+  if (/\.gif$/.test(lower)) return 'image/gif';
+  if (/\.pdf$/.test(lower)) return 'application/pdf';
+  if (/\.txt$/.test(lower)) return 'text/plain';
+  return mimeType || 'application/octet-stream';
+}
+
 @Controller('tickets')
 @UseGuards(RolesGuard)
 export class TicketsController {
@@ -141,7 +152,7 @@ export class TicketsController {
       req.user,
     );
     const safeName = doc.fileName.replaceAll('"', '');
-    res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Type', previewMimeType(doc.fileName, doc.mimeType));
     res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
     return res.sendFile(absolutePath);
   }

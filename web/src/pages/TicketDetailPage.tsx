@@ -119,7 +119,7 @@ type TicketDetail = {
 
 type TicketAttachment = {
   id: string;
-  ticketId: string;
+  ticketId: string | null;
   fileName: string;
   mimeType: string;
   fileSize: string;
@@ -184,6 +184,17 @@ type Draft = {
 type Notice = {
   type: 'success' | 'error';
   message: string;
+};
+
+type WorkflowAgentResult = {
+  decision: {
+    summary: string;
+    confidence: number;
+    missingDocuments: string[];
+    humanRequired: string | null;
+    toStatus: string;
+  };
+  ticket: TicketDetail;
 };
 
 const priorityOptions = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
@@ -267,12 +278,11 @@ const allTicketUpdateFields = [
 ];
 
 const apStageFields: Record<string, string[]> = {
-  DOCS_REVIEW: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
-  MISSING_DOCS: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
-  REQUESTER_PINGED: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
-  WAITING_FOR_DOCS: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  DOCS_REVIEW: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  MISSING_DOCS: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  REQUESTER_PINGED: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  WAITING_FOR_DOCS: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
   VENDOR_PO_ACCOUNT_VERIFICATION: [
-    'status',
     'assignedToId',
     'vendorId',
     'vendorNameSnapshot',
@@ -291,10 +301,9 @@ const apStageFields: Record<string, string[]> = {
     'accountVerificationSource',
     'notes',
   ],
-  WHT_CALCULATION: ['status', 'assignedToId', 'whtFilerStatus', 'whtRate', 'notes'],
-  VOUCHER_GENERATION: ['status', 'assignedToId', 'voucherNumber', 'notes'],
+  WHT_CALCULATION: ['assignedToId', 'whtFilerStatus', 'whtRate', 'notes'],
+  VOUCHER_GENERATION: ['assignedToId', 'voucherNumber', 'notes'],
   XERO_BILL_ENTRY: [
-    'status',
     'assignedToId',
     'xeroSyncStatus',
     'xeroContactId',
@@ -304,7 +313,6 @@ const apStageFields: Record<string, string[]> = {
     'notes',
   ],
   PAYMENT_PREPARATION: [
-    'status',
     'assignedToId',
     'paymentMethod',
     'bankPaymentStatus',
@@ -327,7 +335,6 @@ const apStageFields: Record<string, string[]> = {
 
 const departmentStageFields: Record<string, string[]> = {
   NEW_REQUEST: [
-    'status',
     'title',
     'priority',
     'requesterName',
@@ -339,22 +346,84 @@ const departmentStageFields: Record<string, string[]> = {
     'internalReference',
     'amountPkr',
     'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
     'expenseNature',
     'billType',
     'notes',
   ],
-  ADVANCE_PAID_REMAINING_PENDING: ['status', 'notes'],
-  WAITING_FOR_DOCS: [
-    'status',
+  MISSING_DOCS: [
     'title',
     'requesterName',
     'requesterEmail',
+    'vendorId',
     'vendorNameSnapshot',
     'purchaseOrderNumber',
     'invoiceNumber',
     'internalReference',
     'amountPkr',
     'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'expenseNature',
+    'billType',
+    'notes',
+  ],
+  REQUESTER_PINGED: [
+    'title',
+    'requesterName',
+    'requesterEmail',
+    'vendorId',
+    'vendorNameSnapshot',
+    'purchaseOrderNumber',
+    'invoiceNumber',
+    'internalReference',
+    'amountPkr',
+    'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'expenseNature',
+    'billType',
+    'notes',
+  ],
+  ADVANCE_PAID_REMAINING_PENDING: [
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'notes',
+  ],
+  WAITING_FOR_DOCS: [
+    'title',
+    'requesterName',
+    'requesterEmail',
+    'vendorId',
+    'vendorNameSnapshot',
+    'purchaseOrderNumber',
+    'invoiceNumber',
+    'internalReference',
+    'amountPkr',
+    'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
     'expenseNature',
     'billType',
     'notes',
@@ -464,13 +533,44 @@ function apiErrorMessage(error: unknown) {
   return message ?? maybe.response?.data?.error ?? maybe.message ?? 'Request failed.';
 }
 
-function isPreviewableAttachment(attachment: TicketAttachment) {
+function attachmentExtension(attachment: TicketAttachment) {
+  return attachment.fileName.toLowerCase().split('.').pop() ?? '';
+}
+
+function isImageAttachment(attachment: TicketAttachment) {
   return (
     attachment.mimeType.startsWith('image/') ||
-    attachment.mimeType === 'application/pdf' ||
-    attachment.mimeType.startsWith('text/')
+    ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(attachmentExtension(attachment))
   );
 }
+
+function isPdfAttachment(attachment: TicketAttachment) {
+  return attachment.mimeType === 'application/pdf' || attachmentExtension(attachment) === 'pdf';
+}
+
+function isPlainTextAttachment(attachment: TicketAttachment) {
+  return attachment.mimeType === 'text/plain' || attachmentExtension(attachment) === 'txt';
+}
+
+function isPreviewableAttachment(attachment: TicketAttachment) {
+  return isImageAttachment(attachment) || isPdfAttachment(attachment) || isPlainTextAttachment(attachment);
+}
+
+const departmentAgentStatuses = [
+  'NEW_REQUEST',
+  'MISSING_DOCS',
+  'REQUESTER_PINGED',
+  'WAITING_FOR_DOCS',
+  'ADVANCE_PAID_REMAINING_PENDING',
+];
+const agentOwnedStatuses = [
+  'DOCS_REVIEW',
+  'VENDOR_PO_ACCOUNT_VERIFICATION',
+  'WHT_CALCULATION',
+  'VOUCHER_GENERATION',
+  'XERO_BILL_ENTRY',
+  'PAYMENT_PREPARATION',
+];
 
 function editableFieldsFor(role: string | undefined, status: string) {
   if (status === 'PAYMENT_COMPLETE') return new Set<string>();
@@ -482,7 +582,13 @@ function editableFieldsFor(role: string | undefined, status: string) {
   return new Set<string>();
 }
 
-function saveMessage(payload: Record<string, unknown>) {
+function saveMessage(payload: Record<string, unknown>, updated?: TicketDetail) {
+  if (updated?.status === 'BANK_UPLOAD' && payload.status === undefined) {
+    return 'AI validation passed and released the ticket to AP Finance final review.';
+  }
+  if (updated?.status === 'WAITING_FOR_DOCS' && payload.status === undefined) {
+    return 'AI validation saved the ticket in draft/rework with missing requirements.';
+  }
   if (payload.status === 'BANK_EXECUTION_PENDING') return 'CFO sign recorded successfully.';
   if (payload.status === 'BANK_EXECUTED') return 'Bank execution recorded successfully.';
   if (payload.status === 'REQUESTER_NOTIFIED') return 'Requester notification recorded successfully.';
@@ -602,7 +708,24 @@ export function TicketDetailPage() {
       qc.invalidateQueries({ queryKey: ['tickets'] });
       qc.setQueryData(['ticket', id, scopeKey], updated);
       setDraft(makeDraft(updated));
-      setNotice({ type: 'success', message: saveMessage(payload) });
+      setNotice({ type: 'success', message: saveMessage(payload, updated) });
+    },
+    onError: (mutationError) => {
+      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
+    },
+  });
+
+  const submitToFinance = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<WorkflowAgentResult>(`/api/tickets/${id}/submit-finance`, {});
+      return data;
+    },
+    onSuccess: ({ decision, ticket: updated }) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.setQueryData(['ticket', id, scopeKey], updated);
+      setDraft(makeDraft(updated));
+      setNotice({ type: 'success', message: decision.summary });
     },
     onError: (mutationError) => {
       setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
@@ -727,6 +850,7 @@ export function TicketDetailPage() {
   const isCompanyAdmin = user?.role === 'COMPANY_ADMIN';
   const isAp = user?.role === 'AP_CLERK';
   const isCfo = user?.role === 'CFO';
+  const isDepartmentRole = user?.role === 'DEPT_USER' || user?.role === 'DEPT_ADMIN';
   const isClosed = ticket.status === 'PAYMENT_COMPLETE';
   const editableFields = editableFieldsFor(user?.role, ticket.status);
   const canEdit = (fieldName: string) => editableFields.has(fieldName);
@@ -742,20 +866,14 @@ export function TicketDetailPage() {
     'internalReference',
     'amountPkr',
     'paymentMethod',
-    'expenseNature',
-    'billType',
-  ].some(canEdit);
-  const canEditFinance = [
-    'documentStatus',
-    'missingDocuments',
-    'purchaseOrderVerified',
     'vendorAccountNumber',
     'invoiceAccountNumber',
-    'whtFilerStatus',
-    'voucherNumber',
-    'xeroSyncStatus',
-    'bankPaymentStatus',
-    'trelloCardId',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'expenseNature',
+    'billType',
   ].some(canEdit);
   const canEditCfoSign = Boolean(
     !isClosed &&
@@ -771,14 +889,29 @@ export function TicketDetailPage() {
       (isCompanyAdmin ||
         isAp ||
         (user?.role === 'DEPT_USER' &&
-          ['NEW_REQUEST', 'ADVANCE_PAID_REMAINING_PENDING', 'WAITING_FOR_DOCS'].includes(ticket.status)) ||
+          [
+            'NEW_REQUEST',
+            'MISSING_DOCS',
+            'REQUESTER_PINGED',
+            'ADVANCE_PAID_REMAINING_PENDING',
+            'WAITING_FOR_DOCS',
+          ].includes(ticket.status)) ||
         (isCfo && ticket.status === 'CFO_SIGN_PENDING')),
   );
   const canSubmitRemainingProof = Boolean(
     user?.role === 'DEPT_USER' &&
-      ticket.status === 'ADVANCE_PAID_REMAINING_PENDING' &&
-      canEdit('status'),
+      ticket.status === 'ADVANCE_PAID_REMAINING_PENDING',
   );
+  const canApFinalReview = Boolean(!isClosed && (isAp || isCompanyAdmin) && ticket.status === 'BANK_UPLOAD');
+  const isDepartmentAgentStage = departmentAgentStatuses.includes(ticket.status);
+  const isAgentOwnedStage = agentOwnedStatuses.includes(ticket.status);
+  const agentScopeMessage = isDepartmentAgentStage
+    ? 'Save request details or upload proof. The validation agent checks completeness automatically and releases the ticket only when documents, vendor, PO, account evidence, and amount are ready.'
+    : isAgentOwnedStage
+      ? 'This stage is controlled by the validation agent. Manual status movement is disabled while document, account, WHT, voucher, Xero, and payment readiness checks complete.'
+      : canApFinalReview
+        ? 'AI checks are complete. AP Finance performs one final human review, requests proof in comments if needed, or sends the payment to CFO sign.'
+        : null;
 
   function fullPayload() {
     return {
@@ -838,6 +971,11 @@ export function TicketDetailPage() {
     setNotice(null);
     field('status', status);
     update.mutate(scopedPayload({ status, ...extra }));
+  }
+
+  function submitRemainingProof() {
+    setNotice(null);
+    submitToFinance.mutate();
   }
 
   function onSubmit(event: FormEvent) {
@@ -947,6 +1085,13 @@ export function TicketDetailPage() {
         </div>
       ) : null}
 
+      {isDepartmentRole && !isClosed && !canSaveTicket ? (
+        <div className="notice notice-info" role="status">
+          Tracking view only. Department can follow this ticket here; edits reopen only when it
+          returns to department draft/rework.
+        </div>
+      ) : null}
+
       {ticket.paymentMilestone ? (
         <section className="ticket-panel ticket-wide-panel">
           <div className="payment-plan-header">
@@ -1023,23 +1168,73 @@ export function TicketDetailPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={update.isPending}
-              onClick={() => moveTicketStatus('DOCS_REVIEW')}
+              disabled={submitToFinance.isPending}
+              onClick={submitRemainingProof}
             >
-              Submit remaining proof to finance
+              Submit remaining proof
             </button>
           </div>
+        </section>
+      ) : null}
+
+      {agentScopeMessage ? (
+        <section className="ticket-panel agent-scope-panel">
+          <div>
+            <p className="eyebrow">Agentic validation</p>
+            <h3>
+              {canApFinalReview
+                ? 'AP Finance final review'
+                : isDepartmentAgentStage
+                  ? 'Department draft / rework'
+                  : 'AI verification in progress'}
+            </h3>
+            <p className="muted">{agentScopeMessage}</p>
+            {ticket.missingDocuments.length ? (
+              <p className="missing-line">Missing: {ticket.missingDocuments.join(', ')}</p>
+            ) : null}
+          </div>
+          {canApFinalReview ? (
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={update.isPending}
+                onClick={() =>
+                  moveTicketStatus('CFO_SIGN_PENDING', { bankPaymentStatus: 'UPLOADED' })
+                }
+              >
+                Send to CFO sign
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={update.isPending}
+                onClick={() =>
+                  moveTicketStatus('WAITING_FOR_DOCS', {
+                    documentStatus: 'INCOMPLETE',
+                    missingDocuments: ['Additional proof requested in comments'],
+                  })
+                }
+              >
+                Request proof
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
       <section className="ticket-role-scope">
         <article className={canEditSubmission ? 'scope-card scope-card-active' : 'scope-card'}>
           <strong>Department submission</strong>
-          <span>Request details, PO reference, invoice basics, missing-doc response.</span>
+          <span>Request details, PO reference, invoice basics, proof uploads, and rework.</span>
         </article>
-        <article className={canEditFinance ? 'scope-card scope-card-active' : 'scope-card'}>
-          <strong>AP finance</strong>
-          <span>Document check, vendor/account verification, WHT, voucher, Xero, bank execution.</span>
+        <article className={isAgentOwnedStage || isDepartmentAgentStage ? 'scope-card scope-card-active' : 'scope-card'}>
+          <strong>AI validation agent</strong>
+          <span>Document completeness, vendor, PO, account, WHT, voucher, Xero, and payment readiness.</span>
+        </article>
+        <article className={canApFinalReview ? 'scope-card scope-card-active' : 'scope-card'}>
+          <strong>AP finance final review</strong>
+          <span>One human check, proof request through comments, or send to CFO sign.</span>
         </article>
         <article className={canEditCfoSign ? 'scope-card scope-card-active' : 'scope-card'}>
           <strong>CFO authorization</strong>
@@ -1662,9 +1857,9 @@ function InvoicePreviewPanel({
   onDownload: (attachment: TicketAttachment) => void;
 }) {
   const hasAttachments = attachments.length > 0;
-  const isImage = selectedAttachment?.mimeType.startsWith('image/');
-  const isPdf = selectedAttachment?.mimeType === 'application/pdf';
-  const isText = selectedAttachment?.mimeType.startsWith('text/');
+  const isImage = selectedAttachment ? isImageAttachment(selectedAttachment) : false;
+  const isPdf = selectedAttachment ? isPdfAttachment(selectedAttachment) : false;
+  const isText = selectedAttachment ? isPlainTextAttachment(selectedAttachment) : false;
 
   return (
     <aside className="ticket-panel invoice-preview-panel">
@@ -1714,7 +1909,7 @@ function InvoicePreviewPanel({
           <p className="empty-state">{previewError}</p>
         ) : !selectedAttachment ? (
           <p className="empty-state">
-            Attach an image, PDF, or text invoice to preview it here.
+            Image and PDF slips preview here. Spreadsheet uploads stay in attachments and do not auto-download.
           </p>
         ) : !previewUrl ? (
           <p className="empty-state">Loading preview...</p>

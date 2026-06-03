@@ -81,7 +81,7 @@ const statusLabels: Record<string, string> = {
   VOUCHER_GENERATION: 'Voucher',
   XERO_BILL_ENTRY: 'Xero bill',
   PAYMENT_PREPARATION: 'Payment prep',
-  BANK_UPLOAD: 'Bank upload',
+  BANK_UPLOAD: 'AP finance final review',
   CFO_SIGN_PENDING: 'CFO sign',
   BANK_EXECUTION_PENDING: 'Bank execution',
   BANK_EXECUTED: 'Bank executed',
@@ -96,6 +96,22 @@ const priorityLabels: Record<string, string> = {
   HIGH: 'High',
   URGENT: 'Urgent',
 };
+
+const departmentAgentStatuses = [
+  'NEW_REQUEST',
+  'MISSING_DOCS',
+  'REQUESTER_PINGED',
+  'WAITING_FOR_DOCS',
+  'ADVANCE_PAID_REMAINING_PENDING',
+];
+const agentOwnedStatuses = [
+  'DOCS_REVIEW',
+  'VENDOR_PO_ACCOUNT_VERIFICATION',
+  'WHT_CALCULATION',
+  'VOUCHER_GENERATION',
+  'XERO_BILL_ENTRY',
+  'PAYMENT_PREPARATION',
+];
 
 const pkr = new Intl.NumberFormat('en-PK', {
   style: 'currency',
@@ -141,6 +157,21 @@ function apiErrorMessage(error: unknown) {
   const message = maybe.response?.data?.message;
   if (Array.isArray(message)) return message.join(', ');
   return message ?? maybe.response?.data?.error ?? maybe.message ?? 'Request failed.';
+}
+
+function agentCardNote(ticket: Ticket) {
+  if (departmentAgentStatuses.includes(ticket.status)) {
+    return ticket.missingDocuments.length
+      ? 'AI is holding this in department draft/rework until missing proof is added.'
+      : 'AI validates this after department save or attachment upload.';
+  }
+  if (agentOwnedStatuses.includes(ticket.status)) {
+    return 'AI verification owns this stage and will move it automatically.';
+  }
+  if (ticket.status === 'BANK_UPLOAD') {
+    return 'Ready for AP Finance final review before CFO sign.';
+  }
+  return null;
 }
 
 export function TicketsBoardPage() {
@@ -212,6 +243,7 @@ export function TicketsBoardPage() {
   }, [board, query]);
 
   if (!user) return null;
+  const isDepartmentTrackingRole = user.role === 'DEPT_USER' || user.role === 'DEPT_ADMIN';
 
   return (
     <div className="tickets-page">
@@ -307,6 +339,9 @@ export function TicketsBoardPage() {
                       Missing: {ticket.missingDocuments.slice(0, 2).join(', ')}
                     </p>
                   ) : null}
+                  {agentCardNote(ticket) ? (
+                    <p className="agent-card-note">{agentCardNote(ticket)}</p>
+                  ) : null}
                   {(ticket.availableTransitions ?? []).length ? (
                     <select
                       className="status-move"
@@ -319,7 +354,9 @@ export function TicketsBoardPage() {
                         }
                       }}
                     >
-                      <option value="">Move to next scope step</option>
+                      <option value="">
+                        {ticket.status === 'BANK_UPLOAD' ? 'AP final decision' : 'Move to next scope step'}
+                      </option>
                       {(ticket.availableTransitions ?? []).map((status) => (
                         <option key={status} value={status}>
                           {labelForStatus(status)}
@@ -327,7 +364,15 @@ export function TicketsBoardPage() {
                       ))}
                     </select>
                   ) : (
-                    <span className="status-locked">No permitted move</span>
+                    <span className="status-locked">
+                      {isDepartmentTrackingRole && !departmentAgentStatuses.includes(ticket.status)
+                        ? 'Tracking only'
+                        : agentOwnedStatuses.includes(ticket.status)
+                        ? 'AI controlled'
+                        : departmentAgentStatuses.includes(ticket.status)
+                          ? 'Auto-validates'
+                          : 'No permitted move'}
+                    </span>
                   )}
                 </article>
               ))}

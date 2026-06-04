@@ -92,28 +92,18 @@ export const TICKET_BOARD_COLUMNS = [
     statuses: [TicketStatus.ADVANCE_PAID_REMAINING_PENDING],
   },
   {
-    id: 'department_verification',
-    label: 'AI document verification',
-    scope: 'Agent checks invoice, PO, GRN/receipt, and required proof before AP sees the ticket.',
-    statuses: [TicketStatus.DOCS_REVIEW],
-  },
-  {
-    id: 'data_verification',
-    label: 'AI data verification',
-    scope: 'Agent verifies vendor, PO, account evidence, invoice reference, amount, WHT readiness, and voucher readiness.',
+    id: 'ap_finance_final_review',
+    label: 'AP finance final review',
+    scope: 'AI verification runs in the background; AP finance performs one final tax, voucher, and payment review before CFO sign.',
     statuses: [
+      TicketStatus.DOCS_REVIEW,
       TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION,
       TicketStatus.WHT_CALCULATION,
       TicketStatus.VOUCHER_GENERATION,
       TicketStatus.XERO_BILL_ENTRY,
       TicketStatus.PAYMENT_PREPARATION,
+      TicketStatus.BANK_UPLOAD,
     ],
-  },
-  {
-    id: 'ap_finance_final_review',
-    label: 'AP finance final review',
-    scope: 'AP finance performs one human check, requests proof in comments if needed, or sends to CFO sign.',
-    statuses: [TicketStatus.BANK_UPLOAD],
   },
   {
     id: 'payment_disbursement',
@@ -299,6 +289,9 @@ const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
   [TicketStatus.BANK_UPLOAD]: [
     'status',
     'assignedToId',
+    'whtFilerStatus',
+    'whtRate',
+    'voucherNumber',
     'bankPaymentStatus',
     'bankPortalReference',
     'notes',
@@ -1339,6 +1332,17 @@ export class TicketsService {
       ) {
         await this.assertRemainingPaymentReady(id, user);
       }
+      if (
+        existing.status === TicketStatus.BANK_UPLOAD &&
+        dto.status === TicketStatus.CFO_SIGN_PENDING
+      ) {
+        const nextFilerStatus = dto.whtFilerStatus ?? existing.whtFilerStatus;
+        if (nextFilerStatus === FilerStatus.UNKNOWN) {
+          throw new BadRequestException(
+            'AP Finance must select filer/non-filer before CFO sign',
+          );
+        }
+      }
     }
     if (dto.assignedToId !== undefined && dto.assignedToId !== existing.assignedToId) {
       await this.assertCanAssign(dto.assignedToId, user);
@@ -1651,7 +1655,7 @@ export class TicketsService {
         data.bankPaymentStatus = BankPaymentStatus.READY_FOR_UPLOAD;
         setStatus(TicketStatus.BANK_UPLOAD);
         summary =
-          'Agent verified documents/data, prepared tax/voucher/payment readiness, and released the ticket to AP finance final review.';
+          'Agent verified documents/data, prepared voucher/payment readiness, and released the ticket to AP finance final review.';
         confidence = 95;
       }
       checks.push(
@@ -1746,7 +1750,7 @@ export class TicketsService {
                 : XeroSyncStatus.READY_TO_SYNC;
             data.bankPaymentStatus = BankPaymentStatus.READY_FOR_UPLOAD;
             setStatus(TicketStatus.BANK_UPLOAD);
-            summary = 'Agent verified vendor, PO, account, tax, and voucher readiness for AP final review.';
+            summary = 'Agent verified vendor, PO, account, and voucher readiness for AP final review.';
             confidence = 93;
           }
           break;

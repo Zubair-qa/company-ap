@@ -322,6 +322,9 @@ const apStageFields: Record<string, string[]> = {
   BANK_UPLOAD: [
     'status',
     'assignedToId',
+    'whtFilerStatus',
+    'whtRate',
+    'voucherNumber',
     'bankPaymentStatus',
     'bankPortalReference',
     'notes',
@@ -908,9 +911,9 @@ export function TicketDetailPage() {
   const agentScopeMessage = isDepartmentAgentStage
     ? 'Save request details or upload proof. The validation agent checks completeness automatically and releases the ticket only when documents, vendor, PO, account evidence, and amount are ready.'
     : isAgentOwnedStage
-      ? 'This stage is controlled by the validation agent. Manual status movement is disabled while document, account, WHT, voucher, Xero, and payment readiness checks complete.'
+      ? 'This stage is controlled by the validation agent. Manual status movement is disabled while document, account, voucher, Xero, and payment readiness checks complete.'
       : canApFinalReview
-        ? 'AI checks are complete. AP Finance performs one final human review, requests proof in comments if needed, or sends the payment to CFO sign.'
+        ? 'AI document and data checks are complete. AP Finance sets tax/WHT, voucher, and payment readiness, then requests proof or sends the payment to CFO sign.'
         : null;
 
   function fullPayload() {

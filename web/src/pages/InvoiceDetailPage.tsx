@@ -105,6 +105,15 @@ type CheckoutResponse = {
   status: string | null;
 };
 
+type TicketAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: string;
+  documentType: string;
+  uploadedAt: string;
+};
+
 const pkr = new Intl.NumberFormat('en-PK', {
   style: 'currency',
   currency: 'PKR',
@@ -171,12 +180,22 @@ function invoiceAccountDefaults(extracted: unknown) {
       extractedText(data.accountVerificationSource),
   };
 }
+
+function purchaseOrderRequiredFromExtracted(extracted: unknown) {
+  if (!extracted || typeof extracted !== 'object' || Array.isArray(extracted)) return true;
+  const data = extracted as Record<string, unknown>;
+  if (typeof data.purchaseOrderRequired === 'boolean') return data.purchaseOrderRequired;
+  return data.procurementMode !== 'NON_PURCHASE_ORDER';
+}
 export function InvoiceDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [notice, setNotice] = useState<Notice>(null);
+  const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState('');
 
   const { data: inv, isError, isLoading } = useQuery({
     queryKey: ['invoice', id],
@@ -252,6 +271,75 @@ export function InvoiceDetailPage() {
       else qc.invalidateQueries({ queryKey: ['invoice', id] });
     },
   });
+
+  const { data: attachments = [] } = useQuery({
+    queryKey: ['invoice', id, 'attachments', inv?.ticket?.id],
+    enabled: !!inv?.ticket?.id,
+    queryFn: async () => {
+      const { data } = await api.get<TicketAttachment[]>(
+        `/api/tickets/${inv?.ticket?.id}/attachments`,
+      );
+      return data;
+    },
+  });
+
+  const previewableAttachments = useMemo(
+    () => attachments.filter(isPreviewableAttachment),
+    [attachments],
+  );
+  const selectedPreviewAttachment = useMemo(() => {
+    if (!previewableAttachments.length) return null;
+    return (
+      previewableAttachments.find((attachment) => attachment.id === selectedPreviewId) ??
+      previewableAttachments.find((attachment) => attachment.documentType === 'INVOICE') ??
+      previewableAttachments[0]
+    );
+  }, [previewableAttachments, selectedPreviewId]);
+
+  useEffect(() => {
+    if (!previewableAttachments.length) {
+      setSelectedPreviewId(null);
+      return;
+    }
+    if (
+      !selectedPreviewId ||
+      !previewableAttachments.some((attachment) => attachment.id === selectedPreviewId)
+    ) {
+      setSelectedPreviewId(
+        previewableAttachments.find((attachment) => attachment.documentType === 'INVOICE')?.id ??
+          previewableAttachments[0].id,
+      );
+    }
+  }, [previewableAttachments, selectedPreviewId]);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setPreviewUrl(null);
+    setPreviewError('');
+
+    if (!inv?.ticket?.id || !selectedPreviewAttachment) return undefined;
+
+    api
+      .get<Blob>(
+        `/api/tickets/${inv.ticket.id}/attachments/${selectedPreviewAttachment.id}/preview`,
+        { responseType: 'blob' },
+      )
+      .then(({ data }) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(data);
+        setPreviewUrl(objectUrl);
+      })
+      .catch((previewLoadError) => {
+        if (!active) return;
+        setPreviewError(apiErrorMessage(previewLoadError));
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [inv?.ticket?.id, selectedPreviewAttachment]);
 
   const deleteInvoice = useMutation({
     mutationFn: async () => {
@@ -387,6 +475,18 @@ export function InvoiceDetailPage() {
           </pre>
         </details>
       </div>
+
+      {attachments.length ? (
+        <DocumentPreviewPanel
+          attachments={attachments}
+          previewableAttachments={previewableAttachments}
+          selectedAttachment={selectedPreviewAttachment}
+          selectedPreviewId={selectedPreviewId}
+          setSelectedPreviewId={setSelectedPreviewId}
+          previewUrl={previewUrl}
+          previewError={previewError}
+        />
+      ) : null}
 
       {canDeleteInvoice ? (
         <div className="card">
@@ -540,6 +640,7 @@ function EditInvoiceForm({
     accountDefaults.accountVerificationSource,
   );
   const selectedVendor = vendors.find((vendor) => vendor.id === vendorId) ?? invoice.vendor;
+  const purchaseOrderRequired = purchaseOrderRequiredFromExtracted(invoice.extracted);
 
   useEffect(() => {
     setReceivedDate(toDateInput(invoice.receivedDate));
@@ -644,18 +745,22 @@ function EditInvoiceForm({
             <label>Due date</label>
             <input type="date" value={dueDate} disabled />
           </div>
-          <div className="field">
-            <label>PO number</label>
-            <input value={invoice.purchaseOrder?.poNumber ?? 'Auto generated'} disabled />
-          </div>
-          <div className="field">
-            <label>PO status</label>
-            <input value={invoice.purchaseOrder?.status.replaceAll('_', ' ') ?? 'DRAFT'} disabled />
-          </div>
-          <div className="field">
-            <label>PO expected date</label>
-            <input type="date" value={dueDate} disabled />
-          </div>
+          {purchaseOrderRequired ? (
+            <>
+              <div className="field">
+                <label>PO number</label>
+                <input value={invoice.purchaseOrder?.poNumber ?? 'Auto generated'} disabled />
+              </div>
+              <div className="field">
+                <label>PO status</label>
+                <input value={invoice.purchaseOrder?.status.replaceAll('_', ' ') ?? 'DRAFT'} disabled />
+              </div>
+              <div className="field">
+                <label>PO expected date</label>
+                <input type="date" value={dueDate} disabled />
+              </div>
+            </>
+          ) : null}
           <div className="field">
             <label>Currency</label>
             <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
@@ -666,7 +771,7 @@ function EditInvoiceForm({
             </select>
           </div>
           <div className="field">
-            <label>Invoice / PO subtotal</label>
+            <label>{purchaseOrderRequired ? 'Invoice / PO subtotal' : 'Invoice subtotal'}</label>
             <input
               type="number"
               min={0}
@@ -677,7 +782,7 @@ function EditInvoiceForm({
             />
           </div>
           <div className="field">
-            <label>Invoice / PO tax amount</label>
+            <label>{purchaseOrderRequired ? 'Invoice / PO tax amount' : 'Invoice tax amount'}</label>
             <input
               type="number"
               min={0}
@@ -699,7 +804,7 @@ function EditInvoiceForm({
             />
           </div>
           <div className="field">
-            <label>Invoice / PO total amount</label>
+            <label>{purchaseOrderRequired ? 'Invoice / PO total amount' : 'Invoice total amount'}</label>
             <input
               type="number"
               min={0}
@@ -993,6 +1098,101 @@ function AgentVerification({ extracted }: { extracted: unknown }) {
       ) : null}
     </div>
   );
+}
+
+function DocumentPreviewPanel({
+  attachments,
+  previewableAttachments,
+  selectedAttachment,
+  selectedPreviewId,
+  setSelectedPreviewId,
+  previewUrl,
+  previewError,
+}: {
+  attachments: TicketAttachment[];
+  previewableAttachments: TicketAttachment[];
+  selectedAttachment: TicketAttachment | null;
+  selectedPreviewId: string | null;
+  setSelectedPreviewId: (id: string) => void;
+  previewUrl: string | null;
+  previewError: string;
+}) {
+  return (
+    <div className="card invoice-document-preview-card">
+      <div className="invoice-preview-header">
+        <div>
+          <p className="eyebrow">Uploaded documents</p>
+          <h3 style={{ marginTop: 0 }}>Invoice pack preview</h3>
+        </div>
+        <span className="badge">{attachments.length} documents</span>
+      </div>
+      <div className="preview-selector" aria-label="Select document preview">
+        {previewableAttachments.map((attachment) => (
+          <button
+            type="button"
+            key={attachment.id}
+            onClick={() => setSelectedPreviewId(attachment.id)}
+            className={
+              selectedPreviewId === attachment.id
+                ? 'preview-chip preview-chip-active'
+                : 'preview-chip'
+            }
+          >
+            <span>{attachment.documentType.replaceAll('_', ' ').toLowerCase()}</span>
+            <strong>{attachment.fileName}</strong>
+          </button>
+        ))}
+      </div>
+      <div className="invoice-preview-frame">
+        {!selectedAttachment ? (
+          <p className="empty-state">Image and PDF slips preview here.</p>
+        ) : previewError ? (
+          <p className="empty-state">{previewError}</p>
+        ) : !previewUrl ? (
+          <p className="empty-state">Loading preview...</p>
+        ) : selectedAttachment.mimeType.startsWith('image/') ? (
+          <img src={previewUrl} alt={selectedAttachment.fileName} />
+        ) : (
+          <iframe title={selectedAttachment.fileName} src={previewUrl} />
+        )}
+      </div>
+      <div className="invoice-preview-meta">
+        {attachments.map((attachment) => (
+          <span key={attachment.id}>
+            <small>{attachment.documentType.replaceAll('_', ' ').toLowerCase()}</small>
+            <strong>{attachment.fileName}</strong>
+            <small>{fileSizeText(attachment.fileSize)}</small>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function isPreviewableAttachment(attachment: TicketAttachment) {
+  return (
+    attachment.mimeType.startsWith('image/') ||
+    attachment.mimeType === 'application/pdf' ||
+    /\.pdf$/i.test(attachment.fileName)
+  );
+}
+
+function fileSizeText(value: string) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'Unknown size';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function apiErrorMessage(error: unknown) {
+  const maybe = error as {
+    message?: string;
+    response?: { data?: { message?: string | string[]; error?: string } };
+  };
+  const message = maybe.response?.data?.message;
+  if (Array.isArray(message)) return message.join(', ');
+  return message ?? maybe.response?.data?.error ?? maybe.message ?? 'Request failed.';
 }
 
 function errorMessage(error: unknown, fallback: string) {

@@ -34,10 +34,18 @@ import { calculateFinanceDueDate, TicketsService } from '../tickets/tickets.serv
 import { PatchInvoiceDto } from './dto/invoice.dto';
 import { parseSpreadsheetBuffer } from './invoice-parse.util';
 import {
+  ExtractedGrnFields,
+  ExtractedPurchaseOrderFields,
   ExtractedSlipFields,
+  parseGrnFieldsFromObject,
+  parseGrnFieldsFromOcrOutput,
+  parseGrnFieldsFromText,
   parseInvoiceFieldsFromObject,
   parseInvoiceFieldsFromOcrOutput,
   parseInvoiceFieldsFromText,
+  parsePurchaseOrderFieldsFromObject,
+  parsePurchaseOrderFieldsFromOcrOutput,
+  parsePurchaseOrderFieldsFromText,
 } from './invoice-slip-extract.util';
 
 const SPREADSHEET_MIMES = new Set([
@@ -48,6 +56,16 @@ const SPREADSHEET_MIMES = new Set([
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const KARACHI_OFFSET_MS = 5 * 60 * 60 * 1000;
+type ProcurementMode = 'PURCHASE_ORDER' | 'NON_PURCHASE_ORDER';
+type ExtractionKind = 'invoice' | 'purchase_order' | 'grn';
+type ExtractedDocumentFields = ExtractedSlipFields &
+  ExtractedPurchaseOrderFields &
+  ExtractedGrnFields;
+type UploadedInvoicePackFiles = {
+  invoice: Express.Multer.File;
+  purchaseOrder?: Express.Multer.File;
+  grn?: Express.Multer.File;
+};
 
 function uploadRoot() {
   return process.env.UPLOAD_DIR || './uploads';
@@ -144,12 +162,59 @@ function hasExtractedSlipFields(fields: ExtractedSlipFields) {
   return Boolean(fields.invoiceNumber || fields.invoiceDate || fields.amountPkr != null);
 }
 
+function hasExtractedPurchaseOrderFields(fields: ExtractedPurchaseOrderFields) {
+  return Boolean(fields.poNumber || fields.poDate || fields.poAmountPkr != null);
+}
+
+function hasExtractedGrnFields(fields: ExtractedGrnFields) {
+  return Boolean(fields.poNumber || fields.invoiceNumber);
+}
+
 function missingSlipFields(fields: ExtractedSlipFields) {
   return [
     fields.invoiceNumber ? null : 'invoiceNumber',
     fields.invoiceDate ? null : 'invoiceDate',
     fields.amountPkr != null ? null : 'amountPkr',
   ].filter((field): field is string => Boolean(field));
+}
+
+function missingPurchaseOrderFields(fields: ExtractedPurchaseOrderFields) {
+  return [
+    fields.poNumber ? null : 'poNumber',
+    fields.poDate ? null : 'poDate',
+    fields.poAmountPkr != null ? null : 'poAmountPkr',
+  ].filter((field): field is string => Boolean(field));
+}
+
+function missingGrnFields(fields: ExtractedGrnFields) {
+  return [
+    fields.poNumber ? null : 'poNumber',
+    fields.invoiceNumber ? null : 'invoiceNumber',
+  ].filter((field): field is string => Boolean(field));
+}
+
+function purchaseOrderRequiredFromExtracted(extracted: Prisma.JsonValue | null | undefined) {
+  const data = extractedRecord(extracted);
+  if (typeof data.purchaseOrderRequired === 'boolean') return data.purchaseOrderRequired;
+  if (data.procurementMode === 'NON_PURCHASE_ORDER') return false;
+  return true;
+}
+
+function normalizeReference(value: string | null | undefined) {
+  return value?.trim().toUpperCase() ?? null;
+}
+
+function documentFileMeta(
+  file: Express.Multer.File,
+  documentType: DocumentType,
+): Record<string, unknown> {
+  return {
+    documentType,
+    fileName: file.originalname,
+    filePath: file.filename,
+    mimeType: file.mimetype || 'application/octet-stream',
+    fileSize: file.size ?? 0,
+  };
 }
 
 function mergeSlipFields(
@@ -160,6 +225,27 @@ function mergeSlipFields(
     invoiceNumber: primary.invoiceNumber ?? fallback.invoiceNumber,
     invoiceDate: primary.invoiceDate ?? fallback.invoiceDate,
     amountPkr: primary.amountPkr ?? fallback.amountPkr,
+  };
+}
+
+function mergePurchaseOrderFields(
+  primary: ExtractedPurchaseOrderFields,
+  fallback: ExtractedPurchaseOrderFields,
+): ExtractedPurchaseOrderFields {
+  return {
+    poNumber: primary.poNumber ?? fallback.poNumber,
+    poDate: primary.poDate ?? fallback.poDate,
+    poAmountPkr: primary.poAmountPkr ?? fallback.poAmountPkr,
+  };
+}
+
+function mergeGrnFields(
+  primary: ExtractedGrnFields,
+  fallback: ExtractedGrnFields,
+): ExtractedGrnFields {
+  return {
+    poNumber: primary.poNumber ?? fallback.poNumber,
+    invoiceNumber: primary.invoiceNumber ?? fallback.invoiceNumber,
   };
 }
 
@@ -283,6 +369,51 @@ export class InvoicesService {
     missing: string[];
     error?: string;
   }> {
+    return this.extractDocumentFields(file, 'invoice') as Promise<{
+      fields: ExtractedSlipFields;
+      source: string;
+      missing: string[];
+      error?: string;
+    }>;
+  }
+
+  private async extractPurchaseOrderSlipFields(file: Express.Multer.File): Promise<{
+    fields: ExtractedPurchaseOrderFields;
+    source: string;
+    missing: string[];
+    error?: string;
+  }> {
+    return this.extractDocumentFields(file, 'purchase_order') as Promise<{
+      fields: ExtractedPurchaseOrderFields;
+      source: string;
+      missing: string[];
+      error?: string;
+    }>;
+  }
+
+  private async extractGrnSlipFields(file: Express.Multer.File): Promise<{
+    fields: ExtractedGrnFields;
+    source: string;
+    missing: string[];
+    error?: string;
+  }> {
+    return this.extractDocumentFields(file, 'grn') as Promise<{
+      fields: ExtractedGrnFields;
+      source: string;
+      missing: string[];
+      error?: string;
+    }>;
+  }
+
+  private async extractDocumentFields(
+    file: Express.Multer.File,
+    kind: ExtractionKind,
+  ): Promise<{
+    fields: ExtractedDocumentFields;
+    source: string;
+    missing: string[];
+    error?: string;
+  }> {
     const uploadedPath = join(uploadRoot(), file.filename);
     const textLike =
       /^text\//i.test(file.mimetype) || /\.(txt|text|log)$/i.test(file.originalname);
@@ -290,33 +421,33 @@ export class InvoicesService {
     if (textLike) {
       try {
         const text = await readFile(uploadedPath, 'utf8');
-        const fields = parseInvoiceFieldsFromText(text);
+        const fields = this.parseFieldsFromText(text, kind);
         return {
           fields,
           source: 'uploaded_text',
-          missing: missingSlipFields(fields),
+          missing: this.missingFieldsForKind(fields, kind),
         };
       } catch (error) {
-        const fields: ExtractedSlipFields = {};
+        const fields: ExtractedDocumentFields = {};
         return {
           fields,
           source: 'uploaded_text',
-          missing: missingSlipFields(fields),
+          missing: this.missingFieldsForKind(fields, kind),
           error: error instanceof Error ? error.message : 'Could not read uploaded text',
         };
       }
     }
 
     const providerResults: Array<{
-      fields: ExtractedSlipFields;
+      fields: ExtractedDocumentFields;
       source: string;
       missing: string[];
       error?: string;
     }> = [];
-    let mergedFields: ExtractedSlipFields = {};
+    let mergedFields: ExtractedDocumentFields = {};
     const addProviderResult = (
       result: {
-        fields: ExtractedSlipFields;
+        fields: ExtractedDocumentFields;
         source: string;
         missing: string[];
         error?: string;
@@ -324,11 +455,11 @@ export class InvoicesService {
     ) => {
       if (!result) return false;
       providerResults.push(result);
-      mergedFields = mergeSlipFields(mergedFields, result.fields);
-      return missingSlipFields(mergedFields).length === 0;
+      mergedFields = this.mergeFieldsForKind(mergedFields, result.fields, kind);
+      return this.missingFieldsForKind(mergedFields, kind).length === 0;
     };
 
-    if (addProviderResult(await this.extractWithGroqVision(file, uploadedPath))) {
+    if (addProviderResult(await this.extractWithGroqVision(file, uploadedPath, kind))) {
       return {
         fields: mergedFields,
         source: providerResults.map((result) => result.source).join('+'),
@@ -336,7 +467,7 @@ export class InvoicesService {
       };
     }
 
-    if (addProviderResult(await this.extractWithGeminiVision(file, uploadedPath))) {
+    if (addProviderResult(await this.extractWithGeminiVision(file, uploadedPath, kind))) {
       return {
         fields: mergedFields,
         source: providerResults.map((result) => result.source).join('+'),
@@ -344,7 +475,7 @@ export class InvoicesService {
       };
     }
 
-    if (addProviderResult(await this.extractWithOpenAiVision(file, uploadedPath))) {
+    if (addProviderResult(await this.extractWithOpenAiVision(file, uploadedPath, kind))) {
       return {
         fields: mergedFields,
         source: providerResults.map((result) => result.source).join('+'),
@@ -356,7 +487,7 @@ export class InvoicesService {
       };
     }
 
-    addProviderResult(await this.extractWithConfiguredOcr(file, uploadedPath));
+    addProviderResult(await this.extractWithConfiguredOcr(file, uploadedPath, kind));
 
     if (providerResults.length) {
       const sources = providerResults.map((result) => result.source).join('+');
@@ -366,24 +497,25 @@ export class InvoicesService {
       return {
         fields: mergedFields,
         source: sources,
-        missing: missingSlipFields(mergedFields),
+        missing: this.missingFieldsForKind(mergedFields, kind),
         error: errors.length ? errors.join('; ') : undefined,
       };
     }
 
-    const fields: ExtractedSlipFields = {};
+    const fields: ExtractedDocumentFields = {};
     return {
       fields,
       source: 'manual_no_ocr_provider',
-      missing: missingSlipFields(fields),
+      missing: this.missingFieldsForKind(fields, kind),
     };
   }
 
   private async extractWithGroqVision(
     file: Express.Multer.File,
     uploadedPath: string,
+    kind: ExtractionKind,
   ): Promise<{
-    fields: ExtractedSlipFields;
+    fields: ExtractedDocumentFields;
     source: string;
     missing: string[];
     error?: string;
@@ -392,19 +524,19 @@ export class InvoicesService {
     if (!apiKey) return null;
 
     try {
-      const payload = await this.postImageForGroqOcr(file, uploadedPath, apiKey);
-      const fields = this.fieldsFromOcrPayload(payload);
+      const payload = await this.postImageForGroqOcr(file, uploadedPath, apiKey, kind);
+      const fields = this.fieldsFromOcrPayload(payload, kind);
       return {
         fields,
         source: 'groq_vision',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
       };
     } catch (error) {
-      const fields: ExtractedSlipFields = {};
+      const fields: ExtractedDocumentFields = {};
       return {
         fields,
         source: 'groq_vision',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
         error: error instanceof Error ? error.message : 'Groq vision OCR failed',
       };
     }
@@ -413,8 +545,9 @@ export class InvoicesService {
   private async extractWithGeminiVision(
     file: Express.Multer.File,
     uploadedPath: string,
+    kind: ExtractionKind,
   ): Promise<{
-    fields: ExtractedSlipFields;
+    fields: ExtractedDocumentFields;
     source: string;
     missing: string[];
     error?: string;
@@ -423,19 +556,19 @@ export class InvoicesService {
     if (!apiKey) return null;
 
     try {
-      const payload = await this.postImageForGeminiOcr(file, uploadedPath, apiKey);
-      const fields = this.fieldsFromOcrPayload(payload);
+      const payload = await this.postImageForGeminiOcr(file, uploadedPath, apiKey, kind);
+      const fields = this.fieldsFromOcrPayload(payload, kind);
       return {
         fields,
         source: 'gemini_vision',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
       };
     } catch (error) {
-      const fields: ExtractedSlipFields = {};
+      const fields: ExtractedDocumentFields = {};
       return {
         fields,
         source: 'gemini_vision',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
         error: error instanceof Error ? error.message : 'Gemini vision OCR failed',
       };
     }
@@ -444,8 +577,9 @@ export class InvoicesService {
   private async extractWithConfiguredOcr(
     file: Express.Multer.File,
     uploadedPath: string,
+    kind: ExtractionKind,
   ): Promise<{
-    fields: ExtractedSlipFields;
+    fields: ExtractedDocumentFields;
     source: string;
     missing: string[];
     error?: string;
@@ -457,18 +591,18 @@ export class InvoicesService {
       const payload = await this.postImageForOcr(ocrUrl, file, uploadedPath, {
         apiKey: process.env.OCR_API_KEY || process.env.INVOICE_OCR_API_KEY,
       });
-      const fields = this.fieldsFromOcrPayload(payload);
+      const fields = this.fieldsFromOcrPayload(payload, kind);
       return {
         fields,
         source: 'ocr_provider',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
       };
     } catch (error) {
-      const fields: ExtractedSlipFields = {};
+      const fields: ExtractedDocumentFields = {};
       return {
         fields,
         source: 'ocr_provider',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
         error: error instanceof Error ? error.message : 'OCR provider failed',
       };
     }
@@ -477,8 +611,9 @@ export class InvoicesService {
   private async extractWithOpenAiVision(
     file: Express.Multer.File,
     uploadedPath: string,
+    kind: ExtractionKind,
   ): Promise<{
-    fields: ExtractedSlipFields;
+    fields: ExtractedDocumentFields;
     source: string;
     missing: string[];
     error?: string;
@@ -487,19 +622,19 @@ export class InvoicesService {
     if (!apiKey) return null;
 
     try {
-      const payload = await this.postImageForOpenAiOcr(file, uploadedPath, apiKey);
-      const fields = this.fieldsFromOcrPayload(payload);
+      const payload = await this.postImageForOpenAiOcr(file, uploadedPath, apiKey, kind);
+      const fields = this.fieldsFromOcrPayload(payload, kind);
       return {
         fields,
         source: 'openai_vision',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
       };
     } catch (error) {
-      const fields: ExtractedSlipFields = {};
+      const fields: ExtractedDocumentFields = {};
       return {
         fields,
         source: 'openai_vision',
-        missing: missingSlipFields(fields),
+        missing: this.missingFieldsForKind(fields, kind),
         error: error instanceof Error ? error.message : 'OpenAI vision OCR failed',
       };
     }
@@ -536,11 +671,11 @@ export class InvoicesService {
     file: Express.Multer.File,
     uploadedPath: string,
     apiKey: string,
+    kind: ExtractionKind,
   ) {
     const fileBuffer = await readFile(uploadedPath);
     const imageUrl = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
-    const prompt =
-      'Extract invoice fields from this receipt image. Return only JSON with keys invoiceNumber, invoiceDate, amountPkr, rawText. invoiceDate must be YYYY-MM-DD or null. amountPkr is mandatory when any payable/total amount is visible. Prefer Payable, Net Payable, Amount Due, Total Amount, Grand Total, or Net Total over line item prices. If Payable is visible, use that value. rawText should include the visible lines around invoice number, date, total amount, and payable amount. If a field is not visible, use null.';
+    const prompt = this.ocrPromptForKind(kind);
     const model = process.env.OPENAI_OCR_MODEL || process.env.INVOICE_OCR_MODEL || 'gpt-4.1-mini';
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -614,11 +749,11 @@ export class InvoicesService {
     file: Express.Multer.File,
     uploadedPath: string,
     apiKey: string,
+    kind: ExtractionKind,
   ) {
     const fileBuffer = await readFile(uploadedPath);
     const imageUrl = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
-    const prompt =
-      'You are an accounts payable invoice OCR agent. Read this invoice or receipt image and return only JSON. Extract invoiceNumber, invoiceDate, amountPkr, rawText, and confidence. invoiceDate must be YYYY-MM-DD or null. amountPkr must be the final payable amount when visible. Prefer Payable, Net Payable, Amount Due, Total Amount, Grand Total, or Net Total over item prices, subtotal, tax, MRP, or rate. If the payable value is visible, use that exact value. confidence must be 0 to 1.';
+    const prompt = this.ocrPromptForKind(kind);
     const baseUrl = process.env.GROQ_API_BASE_URL || 'https://api.groq.com/openai/v1';
     const model =
       process.env.GROQ_OCR_MODEL ||
@@ -662,6 +797,7 @@ export class InvoicesService {
     file: Express.Multer.File,
     uploadedPath: string,
     apiKey: string,
+    kind: ExtractionKind,
   ) {
     const fileBuffer = await readFile(uploadedPath);
     const baseUrl =
@@ -672,8 +808,7 @@ export class InvoicesService {
       .split('/')
       .map((part) => encodeURIComponent(part))
       .join('/');
-    const prompt =
-      'You are an accounts payable invoice OCR agent. Read this invoice or receipt image and return only JSON. Extract invoiceNumber, invoiceDate, amountPkr, rawText, and confidence. invoiceDate must be YYYY-MM-DD or null. amountPkr must be the final payable amount when visible. Prefer Payable, Net Payable, Amount Due, Total Amount, Grand Total, or Net Total over item prices, subtotal, tax, MRP, or rate. If the payable value is visible, use that exact value. confidence must be 0 to 1.';
+    const prompt = this.ocrPromptForKind(kind);
 
     const response = await fetch(
       `${baseUrl.replace(/\/$/, '')}/${encodedModelPath}:generateContent`,
@@ -704,10 +839,22 @@ export class InvoicesService {
                 invoiceNumber: { type: ['string', 'null'] },
                 invoiceDate: { type: ['string', 'null'] },
                 amountPkr: { type: ['number', 'null'] },
+                poNumber: { type: ['string', 'null'] },
+                poDate: { type: ['string', 'null'] },
+                poAmountPkr: { type: ['number', 'null'] },
                 rawText: { type: ['string', 'null'] },
                 confidence: { type: 'number' },
               },
-              required: ['invoiceNumber', 'invoiceDate', 'amountPkr', 'rawText', 'confidence'],
+              required: [
+                'invoiceNumber',
+                'invoiceDate',
+                'amountPkr',
+                'poNumber',
+                'poDate',
+                'poAmountPkr',
+                'rawText',
+                'confidence',
+              ],
             },
           },
         }),
@@ -730,25 +877,203 @@ export class InvoicesService {
     }
   }
 
-  private fieldsFromOcrPayload(payload: unknown): ExtractedSlipFields {
-    let directFields: ExtractedSlipFields = {};
+  private fieldsFromOcrPayload(payload: unknown, kind: ExtractionKind): ExtractedDocumentFields {
+    let directFields: ExtractedDocumentFields = {};
     if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      directFields = parseInvoiceFieldsFromObject(payload as Record<string, unknown>);
+      directFields = this.parseFieldsFromObject(payload as Record<string, unknown>, kind);
     }
 
     const ocrText = textFromOcrPayload(payload);
-    const textFields = ocrText ? parseInvoiceFieldsFromOcrOutput(ocrText) : {};
-    return {
-      invoiceNumber: directFields.invoiceNumber ?? textFields.invoiceNumber,
-      invoiceDate: directFields.invoiceDate ?? textFields.invoiceDate,
-      amountPkr: directFields.amountPkr ?? textFields.amountPkr,
+    const textFields = ocrText ? this.parseFieldsFromOcrOutput(ocrText, kind) : {};
+    return this.mergeFieldsForKind(directFields, textFields, kind);
+  }
+
+  private parseFieldsFromText(rawText: string, kind: ExtractionKind): ExtractedDocumentFields {
+    if (kind === 'purchase_order') return parsePurchaseOrderFieldsFromText(rawText);
+    if (kind === 'grn') return parseGrnFieldsFromText(rawText);
+    return parseInvoiceFieldsFromText(rawText);
+  }
+
+  private parseFieldsFromOcrOutput(rawOutput: string, kind: ExtractionKind): ExtractedDocumentFields {
+    if (kind === 'purchase_order') return parsePurchaseOrderFieldsFromOcrOutput(rawOutput);
+    if (kind === 'grn') return parseGrnFieldsFromOcrOutput(rawOutput);
+    return parseInvoiceFieldsFromOcrOutput(rawOutput);
+  }
+
+  private parseFieldsFromObject(data: Record<string, unknown>, kind: ExtractionKind): ExtractedDocumentFields {
+    if (kind === 'purchase_order') return parsePurchaseOrderFieldsFromObject(data);
+    if (kind === 'grn') return parseGrnFieldsFromObject(data);
+    return parseInvoiceFieldsFromObject(data);
+  }
+
+  private mergeFieldsForKind(
+    primary: ExtractedDocumentFields,
+    fallback: ExtractedDocumentFields,
+    kind: ExtractionKind,
+  ): ExtractedDocumentFields {
+    if (kind === 'purchase_order') return mergePurchaseOrderFields(primary, fallback);
+    if (kind === 'grn') return mergeGrnFields(primary, fallback);
+    return mergeSlipFields(primary, fallback);
+  }
+
+  private missingFieldsForKind(fields: ExtractedDocumentFields, kind: ExtractionKind) {
+    if (kind === 'purchase_order') return missingPurchaseOrderFields(fields);
+    if (kind === 'grn') return missingGrnFields(fields);
+    return missingSlipFields(fields);
+  }
+
+  private ocrPromptForKind(kind: ExtractionKind) {
+    if (kind === 'purchase_order') {
+      return 'You are an accounts payable OCR agent. Read this purchase order image and return only JSON with keys poNumber, poDate, poAmountPkr, rawText, confidence. poDate must be YYYY-MM-DD or null. poAmountPkr must be the final purchase order total when visible. Prefer PO Total, Purchase Order Total, Order Total, Grand Total, Net Total, or Total Amount over line item prices, rates, subtotal, or tax. If a field is not visible, use null. confidence must be 0 to 1.';
+    }
+    if (kind === 'grn') {
+      return 'You are an accounts payable OCR agent. Read this GRN/goods received note image and return only JSON with keys poNumber, invoiceNumber, rawText, confidence. Extract the purchase order number and invoice number from the GRN when visible. If a field is not visible, use null. confidence must be 0 to 1.';
+    }
+    return 'You are an accounts payable invoice OCR agent. Read this invoice or receipt image and return only JSON with keys invoiceNumber, invoiceDate, amountPkr, rawText, confidence. invoiceDate must be YYYY-MM-DD or null. amountPkr must be the final payable amount when visible. Prefer Payable, Net Payable, Amount Due, Total Amount, Grand Total, or Net Total over item prices, subtotal, tax, MRP, or rate. If the payable value is visible, use that exact value. If a field is not visible, use null. confidence must be 0 to 1.';
+  }
+
+  async createFromUploadPack(
+    files: UploadedInvoicePackFiles,
+    departmentId: string,
+    submittedBy: { id: string; role: Role; departmentId: string | null },
+    procurementMode: ProcurementMode,
+  ) {
+    if (procurementMode === 'NON_PURCHASE_ORDER') {
+      return this.createFromUpload(files.invoice, departmentId, submittedBy, {
+        purchaseOrderRequired: false,
+      });
+    }
+
+    if (!files.purchaseOrder || !files.grn) {
+      throw new BadRequestException('Purchase order, GRN, and invoice slips are required for PO invoices');
+    }
+
+    this.assertDepartmentCanCreateInvoice(departmentId, submittedBy);
+    const dept = await this.prisma.department.findUnique({ where: { id: departmentId } });
+    if (!dept) throw new BadRequestException('Invalid department');
+
+    const [invoiceSlipExtraction, poSlipExtraction, grnSlipExtraction] = await Promise.all([
+      this.extractInvoiceSlipFields(files.invoice),
+      this.extractPurchaseOrderSlipFields(files.purchaseOrder),
+      this.extractGrnSlipFields(files.grn),
+    ]);
+
+    const invoiceFields = invoiceSlipExtraction.fields;
+    const poFields = poSlipExtraction.fields;
+    const grnFields = grnSlipExtraction.fields;
+    const invoiceNumber = await this.assertUniqueInvoiceNumber(invoiceFields.invoiceNumber ?? null);
+    const amountPkr =
+      invoiceFields.amountPkr != null
+        ? new Prisma.Decimal(invoiceFields.amountPkr)
+        : new Prisma.Decimal(0);
+    const autoDates = automaticInvoiceDates();
+    const poNumberMatch =
+      Boolean(poFields.poNumber && grnFields.poNumber) &&
+      normalizeReference(poFields.poNumber) === normalizeReference(grnFields.poNumber);
+    const invoiceNumberMatch =
+      Boolean(invoiceNumber && grnFields.invoiceNumber) &&
+      normalizeReference(invoiceNumber) === normalizeReference(grnFields.invoiceNumber);
+
+    const extracted: Record<string, unknown> = {
+      procurementMode,
+      purchaseOrderRequired: true,
+      invoiceNumber: invoiceNumber ?? null,
+      invoiceDate: invoiceFields.invoiceDate ?? null,
+      amountPkr: invoiceFields.amountPkr ?? null,
+      poNumber: poFields.poNumber ?? null,
+      poDate: poFields.poDate ?? null,
+      poAmountPkr: poFields.poAmountPkr ?? null,
+      grnPoNumber: grnFields.poNumber ?? null,
+      grnInvoiceNumber: grnFields.invoiceNumber ?? null,
+      invoiceSlipExtraction: {
+        status: hasExtractedSlipFields(invoiceFields)
+          ? invoiceSlipExtraction.missing.length
+            ? 'PARTIAL'
+            : 'COMPLETE'
+          : 'MANUAL_REQUIRED',
+        source: invoiceSlipExtraction.source,
+        missingFields: invoiceSlipExtraction.missing,
+        error: invoiceSlipExtraction.error ?? null,
+      },
+      purchaseOrderSlipExtraction: {
+        status: hasExtractedPurchaseOrderFields(poFields)
+          ? poSlipExtraction.missing.length
+            ? 'PARTIAL'
+            : 'COMPLETE'
+          : 'MANUAL_REQUIRED',
+        source: poSlipExtraction.source,
+        missingFields: poSlipExtraction.missing,
+        error: poSlipExtraction.error ?? null,
+      },
+      grnSlipExtraction: {
+        status: hasExtractedGrnFields(grnFields)
+          ? grnSlipExtraction.missing.length
+            ? 'PARTIAL'
+            : 'COMPLETE'
+          : 'MANUAL_REQUIRED',
+        source: grnSlipExtraction.source,
+        missingFields: grnSlipExtraction.missing,
+        error: grnSlipExtraction.error ?? null,
+      },
+      documentSync: {
+        poNumberMatch,
+        invoiceNumberMatch,
+        poNumberMismatch:
+          Boolean(poFields.poNumber && grnFields.poNumber) && !poNumberMatch,
+        invoiceNumberMismatch:
+          Boolean(invoiceNumber && grnFields.invoiceNumber) && !invoiceNumberMatch,
+      },
+      documentFiles: [
+        documentFileMeta(files.invoice, DocumentType.INVOICE),
+        documentFileMeta(files.purchaseOrder, DocumentType.PO),
+        documentFileMeta(files.grn, DocumentType.GRN),
+      ],
+      needsManualEntry:
+        invoiceSlipExtraction.missing.length > 0 ||
+        poSlipExtraction.missing.length > 0 ||
+        grnSlipExtraction.missing.length > 0,
+      hint: 'PO invoice packs require matching invoice, purchase order, and GRN details before AP finance release.',
     };
+
+    const inv = await this.prisma.invoice.create({
+      data: {
+        departmentId,
+        submittedById: submittedBy.id,
+        fileRelPath: files.invoice.filename,
+        originalFilename: files.invoice.originalname,
+        mimeType: files.invoice.mimetype,
+        extracted: extracted as Prisma.InputJsonValue,
+        amountPkr,
+        invoiceNumber,
+        invoiceDate: dateFromIso(invoiceFields.invoiceDate) ?? undefined,
+        receivedDate: autoDates.receivedDate,
+        dueDate: autoDates.dueDate,
+        reference: invoiceNumber ?? poFields.poNumber ?? null,
+        description: `PO invoice pack: ${files.invoice.originalname}`,
+        subtotal: amountPkr,
+        totalAmount: amountPkr,
+        balanceDue: amountPkr,
+        status: InvoiceStatus.EXTRACTED,
+      },
+    });
+
+    const invoice = await this.applyVendorMatch(inv.id);
+    await this.ensureInvoicePurchaseOrder(inv.id, submittedBy.id);
+    await this.upsertPaymentPlanFromInvoice(inv.id, submittedBy.id);
+    await this.upsertDepartmentTicketFromInvoice(inv.id, submittedBy.id);
+    await this.runTicketAgentForInvoice(inv.id, submittedBy);
+
+    return this.prisma.invoice.findUniqueOrThrow({
+      where: { id: invoice.id },
+      include: invoiceInclude,
+    });
   }
 
   async createFromUpload(
     file: Express.Multer.File,
     departmentId: string,
     submittedBy: { id: string; role: Role; departmentId: string | null },
+    options: { purchaseOrderRequired?: boolean } = {},
   ) {
     this.assertDepartmentCanCreateInvoice(departmentId, submittedBy);
     const dept = await this.prisma.department.findUnique({
@@ -764,6 +1089,10 @@ export class InvoicesService {
     let reference: string | null = null;
     let description: string | null = null;
     let status: InvoiceStatus = InvoiceStatus.UPLOADED;
+    const purchaseOrderRequired = options.purchaseOrderRequired ?? true;
+    const procurementMode: ProcurementMode = purchaseOrderRequired
+      ? 'PURCHASE_ORDER'
+      : 'NON_PURCHASE_ORDER';
 
     const looksSpreadsheet =
       SPREADSHEET_MIMES.has(file.mimetype) ||
@@ -772,7 +1101,12 @@ export class InvoicesService {
     if (looksSpreadsheet) {
       const buf = await readFile(join(uploadRoot(), file.filename));
       const parsed = parseSpreadsheetBuffer(buf);
-      extracted = parsed as unknown as Record<string, unknown>;
+      extracted = {
+        ...(parsed as unknown as Record<string, unknown>),
+        procurementMode,
+        purchaseOrderRequired,
+        documentFiles: [documentFileMeta(file, DocumentType.INVOICE)],
+      };
       amountPkr = new Prisma.Decimal(parsed.amountPkr ?? 0);
       invoiceNumber = parsed.invoiceNumber ?? parsed.reference ?? null;
       invoiceDate = dateFromIso(parsed.invoiceDate);
@@ -788,6 +1122,8 @@ export class InvoicesService {
         amountPkr = new Prisma.Decimal(slipExtraction.fields.amountPkr);
       }
       extracted = {
+        procurementMode,
+        purchaseOrderRequired,
         invoiceNumber: slipExtraction.fields.invoiceNumber ?? null,
         invoiceDate: slipExtraction.fields.invoiceDate ?? null,
         amountPkr: slipExtraction.fields.amountPkr ?? null,
@@ -801,6 +1137,7 @@ export class InvoicesService {
           missingFields: slipExtraction.missing,
           error: slipExtraction.error ?? null,
         },
+        documentFiles: [documentFileMeta(file, DocumentType.INVOICE)],
         needsManualEntry: slipExtraction.missing.length > 0,
         hint: 'Missing slip values can be filled manually by the department.',
       };
@@ -814,6 +1151,8 @@ export class InvoicesService {
         amountPkr = new Prisma.Decimal(slipExtraction.fields.amountPkr);
       }
       extracted = {
+        procurementMode,
+        purchaseOrderRequired,
         invoiceNumber: slipExtraction.fields.invoiceNumber ?? null,
         invoiceDate: slipExtraction.fields.invoiceDate ?? null,
         amountPkr: slipExtraction.fields.amountPkr ?? null,
@@ -827,6 +1166,7 @@ export class InvoicesService {
           missingFields: slipExtraction.missing,
           error: slipExtraction.error ?? null,
         },
+        documentFiles: [documentFileMeta(file, DocumentType.INVOICE)],
         note: 'No automatic line-item extraction for this file type; use Edit to complete the invoice.',
       };
       status = InvoiceStatus.EXTRACTED;
@@ -865,7 +1205,9 @@ export class InvoicesService {
             include: invoiceInclude,
           });
 
-    await this.ensureInvoicePurchaseOrder(inv.id, submittedBy.id);
+    if (purchaseOrderRequired) {
+      await this.ensureInvoicePurchaseOrder(inv.id, submittedBy.id);
+    }
     await this.upsertPaymentPlanFromInvoice(inv.id, submittedBy.id);
     await this.upsertDepartmentTicketFromInvoice(inv.id, submittedBy.id);
     await this.runTicketAgentForInvoice(inv.id, submittedBy);
@@ -890,6 +1232,8 @@ export class InvoicesService {
     const existing = await this.prisma.paymentTicket.findUnique({ where: { invoiceId } });
     const firstMilestone = this.firstPayableMilestone(inv.paymentPlan);
     const accountFields = invoiceAccountFields(inv.extracted);
+    const purchaseOrderRequired = purchaseOrderRequiredFromExtracted(inv.extracted);
+    const extracted = extractedRecord(inv.extracted);
     const internalReference = inv.reference ?? `AP-${invoiceId.slice(0, 8).toUpperCase()}`;
     const title =
       inv.invoiceNumber ??
@@ -918,8 +1262,9 @@ export class InvoicesService {
       billType,
       vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : undefined,
       vendorNameSnapshot: inv.vendor?.displayName ?? null,
-      purchaseOrderNumber: inv.purchaseOrder?.poNumber,
-      purchaseOrderRequired: true,
+      purchaseOrderNumber:
+        purchaseOrderRequired ? inv.purchaseOrder?.poNumber ?? extractedString(extracted.poNumber) : null,
+      purchaseOrderRequired,
       purchaseOrderVerified: false,
       invoiceNumber: inv.invoiceNumber ?? inv.reference,
       internalReference,
@@ -945,6 +1290,7 @@ export class InvoicesService {
         });
       }
       if (existing.status !== TicketStatus.NEW_REQUEST) {
+        await this.ensureInvoiceSupportingDocuments(invoiceId, existing.id, submittedById);
         return;
       }
       await this.prisma.paymentTicket.update({
@@ -955,7 +1301,9 @@ export class InvoicesService {
           dueDate: inv.dueDate,
           vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : { disconnect: true },
           vendorNameSnapshot: inv.vendor?.displayName ?? null,
-          purchaseOrderNumber: inv.purchaseOrder?.poNumber,
+          purchaseOrderNumber:
+            purchaseOrderRequired ? inv.purchaseOrder?.poNumber ?? extractedString(extracted.poNumber) : null,
+          purchaseOrderRequired,
           invoiceNumber: inv.invoiceNumber ?? inv.reference,
           internalReference,
           billType,
@@ -972,6 +1320,7 @@ export class InvoicesService {
           data: { ticket: { connect: { id: existing.id } } },
         });
       }
+      await this.ensureInvoiceSupportingDocuments(invoiceId, existing.id, submittedById);
       return;
     }
 
@@ -989,25 +1338,105 @@ export class InvoicesService {
       },
     });
 
-    if (inv.fileRelPath && inv.originalFilename) {
-      await this.prisma.supportingDocument.create({
-        data: {
-          invoice: { connect: { id: invoiceId } },
-          ticket: { connect: { id: ticket.id } },
-          documentType: DocumentType.INVOICE,
-          fileName: inv.originalFilename,
-          filePath: inv.fileRelPath,
-          mimeType: inv.mimeType ?? 'application/octet-stream',
-          fileSize: BigInt(0),
-          uploadedBy: { connect: { id: submittedById } },
-        },
-      });
-    }
+    await this.ensureInvoiceSupportingDocuments(invoiceId, ticket.id, submittedById);
 
     if (firstMilestone && !firstMilestone.ticketId) {
       await this.prisma.paymentMilestone.update({
         where: { id: firstMilestone.id },
         data: { ticket: { connect: { id: ticket.id } } },
+      });
+    }
+  }
+
+  private async ensureInvoiceSupportingDocuments(
+    invoiceId: string,
+    ticketId: string,
+    uploadedByUserId: string,
+  ) {
+    const inv = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: {
+        poId: true,
+        fileRelPath: true,
+        originalFilename: true,
+        mimeType: true,
+        extracted: true,
+      },
+    });
+    if (!inv) return;
+
+    const extracted = extractedRecord(inv.extracted);
+    const rawDocumentFiles = Array.isArray(extracted.documentFiles)
+      ? extracted.documentFiles
+      : [];
+    const files = rawDocumentFiles
+      .map((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+        const data = item as Record<string, unknown>;
+        const documentTypeText = extractedString(data.documentType);
+        const documentType =
+          documentTypeText && documentTypeText in DocumentType
+            ? (documentTypeText as DocumentType)
+            : DocumentType.INVOICE;
+        const filePath = extractedString(data.filePath);
+        const fileName = extractedString(data.fileName) ?? filePath;
+        if (!filePath || !fileName) return null;
+        return {
+          documentType,
+          filePath,
+          fileName,
+          mimeType: extractedString(data.mimeType) ?? 'application/octet-stream',
+          fileSize:
+            typeof data.fileSize === 'number' && Number.isFinite(data.fileSize)
+              ? BigInt(data.fileSize)
+              : BigInt(0),
+        };
+      })
+      .filter((file): file is {
+        documentType: DocumentType;
+        filePath: string;
+        fileName: string;
+        mimeType: string;
+        fileSize: bigint;
+      } => Boolean(file));
+
+    if (!files.length && inv.fileRelPath && inv.originalFilename) {
+      files.push({
+        documentType: DocumentType.INVOICE,
+        filePath: inv.fileRelPath,
+        fileName: inv.originalFilename,
+        mimeType: inv.mimeType ?? 'application/octet-stream',
+        fileSize: BigInt(0),
+      });
+    }
+
+    for (const file of files) {
+      const existing = await this.prisma.supportingDocument.findFirst({
+        where: {
+          invoiceId,
+          ticketId,
+          filePath: file.filePath,
+          documentType: file.documentType,
+        },
+        select: { id: true },
+      });
+      if (existing) continue;
+
+      await this.prisma.supportingDocument.create({
+        data: {
+          invoice: { connect: { id: invoiceId } },
+          ticket: { connect: { id: ticketId } },
+          purchaseOrder:
+            file.documentType === DocumentType.PO && inv.poId
+              ? { connect: { id: inv.poId } }
+              : undefined,
+          documentType: file.documentType,
+          fileName: file.fileName,
+          filePath: file.filePath,
+          mimeType: file.mimeType,
+          fileSize: file.fileSize,
+          uploadedBy: { connect: { id: uploadedByUserId } },
+        },
       });
     }
   }
@@ -1059,6 +1488,7 @@ export class InvoicesService {
       inv.extracted && typeof inv.extracted === 'object'
         ? (inv.extracted as Record<string, unknown>)
         : {};
+    const purchaseOrderRequired = purchaseOrderRequiredFromExtracted(inv.extracted);
     const submittedToFinanceAt = new Date();
     const vendorName =
       inv.vendor?.displayName ??
@@ -1090,8 +1520,10 @@ export class InvoicesService {
           dueDate: calculateFinanceDueDate(submittedToFinanceAt),
           vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : undefined,
           vendorNameSnapshot: vendorName,
-          purchaseOrderNumber: inv.purchaseOrder?.poNumber,
-          purchaseOrderVerified: true,
+          purchaseOrderNumber:
+            purchaseOrderRequired ? inv.purchaseOrder?.poNumber ?? extractedString(extracted.poNumber) : null,
+          purchaseOrderRequired,
+          purchaseOrderVerified: purchaseOrderRequired,
           invoiceNumber: inv.invoiceNumber ?? inv.reference,
           billType,
           amountPkr: ticketAmount,
@@ -1122,6 +1554,7 @@ export class InvoicesService {
           },
         });
       }
+      await this.ensureInvoiceSupportingDocuments(invoiceId, existing.id, submittedById);
       return;
     }
 
@@ -1143,10 +1576,11 @@ export class InvoicesService {
         billType,
         vendor: inv.vendorId ? { connect: { id: inv.vendorId } } : undefined,
         vendorNameSnapshot: vendorName,
-        purchaseOrderNumber: inv.purchaseOrder?.poNumber,
-        purchaseOrderRequired: true,
-        purchaseOrderVerified: true,
-        invoiceNumber: inv.reference,
+        purchaseOrderNumber:
+          purchaseOrderRequired ? inv.purchaseOrder?.poNumber ?? extractedString(extracted.poNumber) : null,
+        purchaseOrderRequired,
+        purchaseOrderVerified: purchaseOrderRequired,
+        invoiceNumber: inv.invoiceNumber ?? inv.reference,
         internalReference: `AP-${invoiceId.slice(0, 8).toUpperCase()}`,
         amountPkr: ticketAmount,
         paymentMethod: PaymentMethod.BANK_PORTAL,
@@ -1160,7 +1594,11 @@ export class InvoicesService {
           ? DocumentStatus.INCOMPLETE
           : DocumentStatus.PENDING_REVIEW,
         missingDocuments: needsVendorReview
-          ? ['Vendor verification', 'Vendor account proof', 'Purchase order']
+          ? [
+              'Vendor verification',
+              'Vendor account proof',
+              ...(purchaseOrderRequired ? ['Purchase order'] : []),
+            ]
           : [],
         xeroSyncStatus: XeroSyncStatus.NOT_READY,
         bankPaymentStatus: BankPaymentStatus.NOT_READY,
@@ -1181,20 +1619,7 @@ export class InvoicesService {
       },
     });
 
-    if (inv.fileRelPath && inv.originalFilename) {
-      await this.prisma.supportingDocument.create({
-        data: {
-          invoice: { connect: { id: invoiceId } },
-          ticket: { connect: { id: ticket.id } },
-          documentType: DocumentType.INVOICE,
-          fileName: inv.originalFilename,
-          filePath: inv.fileRelPath,
-          mimeType: inv.mimeType ?? 'application/octet-stream',
-          fileSize: BigInt(0),
-          uploadedBy: { connect: { id: submittedById } },
-        },
-      });
-    }
+    await this.ensureInvoiceSupportingDocuments(invoiceId, ticket.id, submittedById);
   }
 
   private async ensureInvoicePurchaseOrder(invoiceId: string, requestedById: string) {
@@ -1208,12 +1633,24 @@ export class InvoicesService {
       },
     });
     if (!inv) throw new NotFoundException();
+    if (!purchaseOrderRequiredFromExtracted(inv.extracted)) {
+      return null;
+    }
 
     const vendorId = inv.vendorId ?? (await this.ensurePendingVendor(inv.departmentId, inv.department.name));
-    const amount = inv.totalAmount.gt(0) ? inv.totalAmount : inv.amountPkr;
+    const extracted = extractedRecord(inv.extracted);
+    const extractedPoAmount =
+      typeof extracted.poAmountPkr === 'number' && Number.isFinite(extracted.poAmountPkr)
+        ? new Prisma.Decimal(extracted.poAmountPkr)
+        : null;
+    const amount = extractedPoAmount ?? (inv.totalAmount.gt(0) ? inv.totalAmount : inv.amountPkr);
     const subtotal = inv.subtotal.gt(0) ? inv.subtotal : amount;
-    const poNumber = `PO-${inv.id.slice(0, 8).toUpperCase()}`;
-    const poDate = inv.invoiceDate ?? inv.receivedDate ?? new Date();
+    const poNumber = await this.uniquePurchaseOrderNumber(
+      extractedString(extracted.poNumber) ?? `PO-${inv.id.slice(0, 8).toUpperCase()}`,
+      inv.id,
+      inv.poId,
+    );
+    const poDate = dateFromIso(extractedString(extracted.poDate) ?? undefined) ?? inv.invoiceDate ?? inv.receivedDate ?? new Date();
     const expectedDeliveryDate = inv.dueDate ?? undefined;
     const notes =
       inv.description ??
@@ -1276,6 +1713,27 @@ export class InvoicesService {
     return po;
   }
 
+  private async uniquePurchaseOrderNumber(
+    preferred: string,
+    invoiceId: string,
+    currentPoId: string | null,
+  ) {
+    const cleaned = preferred.trim() || `PO-${invoiceId.slice(0, 8).toUpperCase()}`;
+    const existing = await this.prisma.purchaseOrder.findUnique({
+      where: { poNumber: cleaned },
+      select: { id: true },
+    });
+    if (!existing || existing.id === currentPoId) return cleaned;
+
+    const fallback = `${cleaned}-${invoiceId.slice(0, 4).toUpperCase()}`;
+    const fallbackExisting = await this.prisma.purchaseOrder.findUnique({
+      where: { poNumber: fallback },
+      select: { id: true },
+    });
+    if (!fallbackExisting || fallbackExisting.id === currentPoId) return fallback;
+    return `PO-${invoiceId.slice(0, 8).toUpperCase()}`;
+  }
+
   private async upsertPaymentPlanFromInvoice(
     invoiceId: string,
     actorId: string,
@@ -1293,6 +1751,7 @@ export class InvoicesService {
     });
     if (!inv) throw new NotFoundException();
 
+    const purchaseOrderRequired = purchaseOrderRequiredFromExtracted(inv.extracted);
     const totalAmount = inv.totalAmount.gt(0) ? inv.totalAmount : inv.amountPkr;
     const existing = inv.paymentPlan;
     const planType = dto?.paymentPlanType ?? existing?.planType ?? PaymentPlanType.FULL_PAYMENT;
@@ -1360,7 +1819,7 @@ export class InvoicesService {
         amount: advanceAmount,
         percent,
         status: PaymentMilestoneStatus.DRAFT,
-        requiredDocuments: ['INVOICE', 'PO'],
+        requiredDocuments: purchaseOrderRequired ? ['INVOICE', 'PO', 'GRN'] : ['INVOICE'],
       });
       await this.upsertMilestone(plan.id, {
         sequence: 2,
@@ -1383,7 +1842,7 @@ export class InvoicesService {
         amount: totalAmount,
         percent: new Prisma.Decimal(100),
         status: PaymentMilestoneStatus.DRAFT,
-        requiredDocuments: ['INVOICE', 'PO'],
+        requiredDocuments: purchaseOrderRequired ? ['INVOICE', 'PO', 'GRN'] : ['INVOICE'],
       });
       await this.prisma.paymentMilestone.deleteMany({
         where: { paymentPlanId: plan.id, sequence: { gt: 1 }, status: { not: PaymentMilestoneStatus.PAID } },
@@ -1849,6 +2308,7 @@ export class InvoicesService {
       include: {
         vendor: true,
         department: true,
+        purchaseOrder: true,
         paymentPlan: { include: { milestones: { orderBy: { sequence: 'asc' } } } },
       },
     });
@@ -1868,6 +2328,8 @@ export class InvoicesService {
     const titleSuffix =
       firstMilestone?.kind === PaymentMilestoneKind.ADVANCE ? ' - advance payment' : '';
     const accountFields = invoiceAccountFields(inv.extracted);
+    const purchaseOrderRequired = purchaseOrderRequiredFromExtracted(inv.extracted);
+    const extracted = extractedRecord(inv.extracted);
     const internalReference = inv.reference ?? ticket.internalReference;
     const accountSyncData = accountFields.hasExplicitAccountSync
       ? {
@@ -1888,6 +2350,9 @@ export class InvoicesService {
         title: `${title}${titleSuffix}`,
         invoiceNumber: inv.invoiceNumber ?? inv.reference,
         internalReference,
+        purchaseOrderRequired,
+        purchaseOrderNumber:
+          purchaseOrderRequired ? inv.purchaseOrder?.poNumber ?? extractedString(extracted.poNumber) : null,
         billType: firstMilestone
           ? this.billTypeForMilestone(firstMilestone.kind)
           : ticket.billType,

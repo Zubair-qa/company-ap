@@ -654,6 +654,38 @@ function hasSlipExtractionMarker(extracted: Prisma.JsonValue | null | undefined)
   return Boolean(data?.invoiceSlipExtraction);
 }
 
+function textJsonValue(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizedDocReference(value: unknown) {
+  return textJsonValue(value)?.toUpperCase() ?? null;
+}
+
+function poGrnExtractionGaps(extracted: Prisma.JsonValue | null | undefined) {
+  const data = jsonRecord(extracted);
+  if (!data || data.purchaseOrderRequired === false || data.procurementMode === 'NON_PURCHASE_ORDER') {
+    return [];
+  }
+
+  const gaps: string[] = [];
+  const poNumber = normalizedDocReference(data.poNumber);
+  const grnPoNumber = normalizedDocReference(data.grnPoNumber);
+  const grnInvoiceNumber = normalizedDocReference(data.grnInvoiceNumber);
+  const invoiceNumber = normalizedDocReference(data.invoiceNumber);
+
+  if (poNumber && grnPoNumber && poNumber !== grnPoNumber) {
+    gaps.push('PO number mismatch between PO slip and GRN slip');
+  }
+  if (invoiceNumber && grnInvoiceNumber && invoiceNumber !== grnInvoiceNumber) {
+    gaps.push('Invoice number mismatch between invoice slip and GRN slip');
+  }
+
+  return gaps;
+}
+
 function financeAmount(
   netPayablePkr: Prisma.Decimal | null | undefined,
   amountPkr: Prisma.Decimal | null | undefined,
@@ -3269,6 +3301,9 @@ export class TicketsService {
         }
       }
     }
+    if (ticket.purchaseOrderRequired && ticket.invoice) {
+      gaps.push(...poGrnExtractionGaps(ticket.invoice.extracted));
+    }
 
     const hasAccountEvidence =
       Boolean(ticket.vendorAccountNumber) ||
@@ -3325,12 +3360,16 @@ export class TicketsService {
     if (!hasDocument(DocumentType.INVOICE) && !hasDocument(DocumentType.RECEIPT)) {
       missing.push('Invoice scan/slip');
     }
-    if (
-      ticket.purchaseOrderRequired &&
-      !ticket.purchaseOrderNumber &&
-      !hasDocument(DocumentType.PO)
-    ) {
-      missing.push('Purchase order');
+    if (ticket.purchaseOrderRequired) {
+      if (!hasDocument(DocumentType.PO)) {
+        missing.push('Purchase order slip');
+      }
+      if (!ticket.purchaseOrderNumber) {
+        missing.push('Purchase order number');
+      }
+      if (!hasDocument(DocumentType.GRN)) {
+        missing.push('GRN slip');
+      }
     }
 
     const needsReceivingProof =

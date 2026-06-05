@@ -20,7 +20,12 @@ function apiErrorMessage(error: unknown, fallback: string) {
 export function UploadPage() {
   const { user } = useAuth();
   const nav = useNavigate();
-  const [file, setFile] = useState<File | null>(null);
+  const [procurementMode, setProcurementMode] = useState<'PURCHASE_ORDER' | 'NON_PURCHASE_ORDER'>(
+    'PURCHASE_ORDER',
+  );
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [poFile, setPoFile] = useState<File | null>(null);
+  const [grnFile, setGrnFile] = useState<File | null>(null);
   const [departmentId, setDepartmentId] = useState(user?.departmentId ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -45,12 +50,22 @@ export function UploadPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!file || !departmentId) return;
+    if (!invoiceFile || !departmentId) return;
+    if (procurementMode === 'PURCHASE_ORDER' && (!poFile || !grnFile)) {
+      setError('Purchase order, GRN, and invoice slips are required for PO invoices.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append('procurementMode', procurementMode);
+      fd.append('purchaseOrderRequired', procurementMode === 'PURCHASE_ORDER' ? 'true' : 'false');
+      fd.append('invoiceFile', invoiceFile);
+      if (procurementMode === 'PURCHASE_ORDER') {
+        if (poFile) fd.append('poFile', poFile);
+        if (grnFile) fd.append('grnFile', grnFile);
+      }
       fd.append('departmentId', departmentId);
       const { data } = await api.post<{ id: string }>('/api/invoice-files/upload', fd);
       nav(`/invoices/${data.id}`);
@@ -91,11 +106,32 @@ export function UploadPage() {
     <div>
       <h2 style={{ marginTop: 0 }}>Create invoice</h2>
       <p className="muted">
-        Department users submit invoices here. The request first goes through synced PO creation,
-        payment-plan setup, and agent validation before AP receives it.
+        Department users submit invoices here. Purchase-order invoices require PO, GRN, and
+        invoice slips; non-PO invoices use the existing single invoice flow.
       </p>
       <div className="card">
         <form onSubmit={onSubmit}>
+          <div className="field">
+            <label>Invoice type</label>
+            <div className="procurement-toggle" role="group" aria-label="Invoice type">
+              <label className={procurementMode === 'PURCHASE_ORDER' ? 'selected' : ''}>
+                <input
+                  type="checkbox"
+                  checked={procurementMode === 'PURCHASE_ORDER'}
+                  onChange={() => setProcurementMode('PURCHASE_ORDER')}
+                />
+                Purchase order
+              </label>
+              <label className={procurementMode === 'NON_PURCHASE_ORDER' ? 'selected' : ''}>
+                <input
+                  type="checkbox"
+                  checked={procurementMode === 'NON_PURCHASE_ORDER'}
+                  onChange={() => setProcurementMode('NON_PURCHASE_ORDER')}
+                />
+                Non purchase order
+              </label>
+            </div>
+          </div>
           <div className="field">
             <label htmlFor="dept">Department (cost center owner)</label>
             <select
@@ -113,16 +149,31 @@ export function UploadPage() {
               ))}
             </select>
           </div>
-          <div className="field">
-            <label htmlFor="file">File</label>
-            <input
-              id="file"
-              type="file"
-              accept=".pdf,.xlsx,.xls,.csv,image/*"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              required
+          {procurementMode === 'PURCHASE_ORDER' ? (
+            <div className="upload-pack-grid">
+              <FileInput
+                id="poFile"
+                label="Purchase order slip"
+                file={poFile}
+                onFile={setPoFile}
+              />
+              <FileInput id="grnFile" label="GRN slip" file={grnFile} onFile={setGrnFile} />
+              <FileInput
+                id="invoiceFile"
+                label="Invoice slip"
+                file={invoiceFile}
+                onFile={setInvoiceFile}
+              />
+            </div>
+          ) : (
+            <FileInput
+              id="invoiceFile"
+              label="Invoice slip"
+              file={invoiceFile}
+              onFile={setInvoiceFile}
+              allowSpreadsheet
             />
-          </div>
+          )}
           {error ? <p className="error">{error}</p> : null}
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {busy ? 'Creating...' : 'Create invoice'}
@@ -135,6 +186,34 @@ export function UploadPage() {
         Publish or export the sheet as CSV, then paste the published CSV URL below.
       </p>
       <GoogleCsvImport departmentId={departmentId} />
+    </div>
+  );
+}
+
+function FileInput({
+  id,
+  label,
+  file,
+  onFile,
+  allowSpreadsheet = false,
+}: {
+  id: string;
+  label: string;
+  file: File | null;
+  onFile: (file: File | null) => void;
+  allowSpreadsheet?: boolean;
+}) {
+  return (
+    <div className="field upload-file-card">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        type="file"
+        accept={allowSpreadsheet ? '.pdf,.xlsx,.xls,.csv,image/*' : '.pdf,image/*'}
+        onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+        required
+      />
+      <small>{file ? file.name : 'No file selected'}</small>
     </div>
   );
 }

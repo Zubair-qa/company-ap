@@ -4,9 +4,25 @@ export type ExtractedSlipFields = {
   amountPkr?: number;
 };
 
+export type ExtractedPurchaseOrderFields = {
+  poNumber?: string;
+  poDate?: string;
+  poAmountPkr?: number;
+};
+
+export type ExtractedGrnFields = {
+  poNumber?: string;
+  invoiceNumber?: string;
+};
+
 const invoiceNumberPatterns = [
   /\b(?:invoice|inv|bill|receipt|slip)\s*(?:number|no|num|#)\s*[.:#-]*\s*([A-Z0-9][A-Z0-9/_-]{1,39})\b/i,
   /\b(?:invoice|inv|bill|receipt|slip)\s*#\s*[.:#-]*\s*([A-Z0-9][A-Z0-9/_-]{1,39})\b/i,
+];
+
+const poNumberPatterns = [
+  /\b(?:purchase\s*order|p\.?\s*o\.?|po)\s*(?:number|no|num|#)?\s*[.:#-]*\s*([A-Z0-9][A-Z0-9/_-]{1,39})\b/i,
+  /\b(?:po|p\.o\.)\s*#\s*[.:#-]*\s*([A-Z0-9][A-Z0-9/_-]{1,39})\b/i,
 ];
 
 const labelledDatePatterns = [
@@ -21,6 +37,9 @@ const anyDatePatterns = [
 
 const amountLineKeywords =
   /\b(grand\s*total|net\s*total|total\s*amount|invoice\s*amount|amount\s*due|balance\s*due|payable|net\s*payable|gross\s*amount|paid\s*amount|\btotal\b)\b/i;
+
+const poAmountLineKeywords =
+  /\b(po\s*amount|purchase\s*order\s*amount|order\s*amount|po\s*total|purchase\s*order\s*total|order\s*total|grand\s*total|net\s*total|total\s*amount|\btotal\b)\b/i;
 
 const currencyAmountPattern =
   /\b(?:rs\.?|pkr)\s*[-:]?\s*([0-9][0-9,]*(?:\.\d{1,2})?)\b/gi;
@@ -91,6 +110,108 @@ export function parseInvoiceFieldsFromObject(data: Record<string, unknown>): Ext
   });
 }
 
+export function parsePurchaseOrderFieldsFromText(rawText: string): ExtractedPurchaseOrderFields {
+  const text = normalizeOcrText(rawText);
+  if (!text) return {};
+
+  return {
+    poNumber: extractPoNumber(text),
+    poDate: extractDate(text, [
+      /\b(?:po\s*date|purchase\s*order\s*date|order\s*date|date)\s*[:#-]?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\b/i,
+      /\b(?:po\s*date|purchase\s*order\s*date|order\s*date|date)\s*[:#-]?\s*(\d{4}[./-]\d{1,2}[./-]\d{1,2})\b/i,
+    ]),
+    poAmountPkr: extractAmount(text, poAmountLineKeywords),
+  };
+}
+
+export function parsePurchaseOrderFieldsFromOcrOutput(
+  rawOutput: string,
+): ExtractedPurchaseOrderFields {
+  const textFields = parsePurchaseOrderFieldsFromText(rawOutput);
+  const jsonFields = parsePurchaseOrderFieldsFromJsonText(rawOutput);
+  return mergePurchaseOrderFields(textFields, jsonFields);
+}
+
+export function parsePurchaseOrderFieldsFromObject(
+  data: Record<string, unknown>,
+): ExtractedPurchaseOrderFields {
+  const rawText = firstObjectString(data, ['rawText', 'text', 'ocrText', 'plainText', 'content']);
+  const textFields = rawText ? parsePurchaseOrderFieldsFromText(rawText) : {};
+  const poNumber = firstObjectString(data, [
+    'poNumber',
+    'poNo',
+    'po_no',
+    'purchaseOrderNumber',
+    'purchase_order_number',
+    'purchaseOrderNo',
+    'orderNumber',
+  ]);
+  const poDate = normalizeObjectDate(
+    firstObjectValue(data, ['poDate', 'po_date', 'purchaseOrderDate', 'orderDate', 'date']),
+  );
+  const poAmountPkr = normalizeObjectAmount(
+    firstObjectValue(data, [
+      'poAmountPkr',
+      'poAmount',
+      'purchaseOrderAmount',
+      'orderAmount',
+      'poTotal',
+      'purchaseOrderTotal',
+      'totalAmount',
+      'total',
+      'grandTotal',
+      'amount',
+    ]),
+  );
+
+  return mergePurchaseOrderFields(textFields, {
+    poNumber: poNumber ?? undefined,
+    poDate: poDate ?? undefined,
+    poAmountPkr: poAmountPkr ?? undefined,
+  });
+}
+
+export function parseGrnFieldsFromText(rawText: string): ExtractedGrnFields {
+  const text = normalizeOcrText(rawText);
+  if (!text) return {};
+
+  return {
+    poNumber: extractPoNumber(text),
+    invoiceNumber: extractInvoiceNumber(text),
+  };
+}
+
+export function parseGrnFieldsFromOcrOutput(rawOutput: string): ExtractedGrnFields {
+  const textFields = parseGrnFieldsFromText(rawOutput);
+  const jsonFields = parseGrnFieldsFromJsonText(rawOutput);
+  return mergeGrnFields(textFields, jsonFields);
+}
+
+export function parseGrnFieldsFromObject(data: Record<string, unknown>): ExtractedGrnFields {
+  const rawText = firstObjectString(data, ['rawText', 'text', 'ocrText', 'plainText', 'content']);
+  const textFields = rawText ? parseGrnFieldsFromText(rawText) : {};
+  const poNumber = firstObjectString(data, [
+    'poNumber',
+    'poNo',
+    'po_no',
+    'purchaseOrderNumber',
+    'purchase_order_number',
+    'purchaseOrderNo',
+  ]);
+  const invoiceNumber = firstObjectString(data, [
+    'invoiceNumber',
+    'invoiceNo',
+    'invoice_no',
+    'invoice',
+    'billNumber',
+  ]);
+
+  return mergeGrnFields(textFields, {
+    poNumber: poNumber ?? undefined,
+    invoiceNumber: invoiceNumber ?? undefined,
+  });
+}
+
 export function normalizeInvoiceDate(value: string): string | null {
   const match = value.trim().match(/^(\d{1,4})[./-](\d{1,2})[./-](\d{1,4})$/);
   if (!match) return null;
@@ -141,6 +262,32 @@ function parseInvoiceFieldsFromJsonText(rawOutput: string): ExtractedSlipFields 
   }
 }
 
+function parsePurchaseOrderFieldsFromJsonText(rawOutput: string): ExtractedPurchaseOrderFields {
+  const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return {};
+
+  try {
+    const data = JSON.parse(jsonMatch[0]) as unknown;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+    return parsePurchaseOrderFieldsFromObject(data as Record<string, unknown>);
+  } catch {
+    return {};
+  }
+}
+
+function parseGrnFieldsFromJsonText(rawOutput: string): ExtractedGrnFields {
+  const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return {};
+
+  try {
+    const data = JSON.parse(jsonMatch[0]) as unknown;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+    return parseGrnFieldsFromObject(data as Record<string, unknown>);
+  } catch {
+    return {};
+  }
+}
+
 function mergeFields(
   fallback: ExtractedSlipFields,
   preferred: ExtractedSlipFields,
@@ -149,6 +296,27 @@ function mergeFields(
     invoiceNumber: preferred.invoiceNumber ?? fallback.invoiceNumber,
     invoiceDate: preferred.invoiceDate ?? fallback.invoiceDate,
     amountPkr: preferred.amountPkr ?? fallback.amountPkr,
+  };
+}
+
+function mergePurchaseOrderFields(
+  fallback: ExtractedPurchaseOrderFields,
+  preferred: ExtractedPurchaseOrderFields,
+): ExtractedPurchaseOrderFields {
+  return {
+    poNumber: preferred.poNumber ?? fallback.poNumber,
+    poDate: preferred.poDate ?? fallback.poDate,
+    poAmountPkr: preferred.poAmountPkr ?? fallback.poAmountPkr,
+  };
+}
+
+function mergeGrnFields(
+  fallback: ExtractedGrnFields,
+  preferred: ExtractedGrnFields,
+): ExtractedGrnFields {
+  return {
+    poNumber: preferred.poNumber ?? fallback.poNumber,
+    invoiceNumber: preferred.invoiceNumber ?? fallback.invoiceNumber,
   };
 }
 
@@ -169,6 +337,15 @@ function extractInvoiceNumber(text: string): string | undefined {
   return undefined;
 }
 
+function extractPoNumber(text: string): string | undefined {
+  for (const pattern of poNumberPatterns) {
+    const match = text.match(pattern);
+    const cleaned = match?.[1] ? cleanInvoiceNumber(match[1]) : null;
+    if (cleaned) return cleaned;
+  }
+  return undefined;
+}
+
 function cleanInvoiceNumber(value: string) {
   const cleaned = value.replace(/[.,;:)]+$/g, '').trim();
   if (!cleaned) return null;
@@ -177,7 +354,11 @@ function cleanInvoiceNumber(value: string) {
 }
 
 function extractInvoiceDate(text: string): string | undefined {
-  for (const pattern of labelledDatePatterns) {
+  return extractDate(text, labelledDatePatterns);
+}
+
+function extractDate(text: string, labelledPatterns: RegExp[]): string | undefined {
+  for (const pattern of labelledPatterns) {
     const match = text.match(pattern);
     const normalized = match?.[1] ? normalizeInvoiceDate(match[1]) : null;
     if (normalized) return normalized;
@@ -192,7 +373,7 @@ function extractInvoiceDate(text: string): string | undefined {
   return undefined;
 }
 
-function extractAmount(text: string): number | undefined {
+function extractAmount(text: string, keywordPattern = amountLineKeywords): number | undefined {
   const lines = text
     .split('\n')
     .map((line) => line.trim())
@@ -208,7 +389,7 @@ function extractAmount(text: string): number | undefined {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!amountLineKeywords.test(line)) continue;
+    if (!keywordPattern.test(line)) continue;
     const amounts = amountsFromWindow(lines, index);
     if (amounts.length) return amounts[amounts.length - 1];
   }

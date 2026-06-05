@@ -124,6 +124,16 @@ export class TicketsController {
     return this.tickets.addComment(id, dto.message, req.user);
   }
 
+  @Post(':id/cfo-reject')
+  @Roles(Role.CFO, Role.COMPANY_ADMIN)
+  cfoReject(
+    @Param('id') id: string,
+    @Body() dto: { reason?: string },
+    @Req() req: { user: RequestUser },
+  ) {
+    return this.tickets.rejectFromCfo(id, dto.reason, req.user);
+  }
+
   @Get(':id/attachments/:attachmentId/download')
   async downloadAttachment(
     @Param('id') id: string,

@@ -27,8 +27,8 @@ import {
   VendorKind,
   XeroSyncStatus,
 } from '@prisma/client';
-import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { readFile, unlink } from 'fs/promises';
+import { join, resolve } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { calculateFinanceDueDate, TicketsService } from '../tickets/tickets.service';
 import { PatchInvoiceDto } from './dto/invoice.dto';
@@ -47,6 +47,7 @@ const SPREADSHEET_MIMES = new Set([
 ]);
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const KARACHI_OFFSET_MS = 5 * 60 * 60 * 1000;
 
 function uploadRoot() {
   return process.env.UPLOAD_DIR || './uploads';
@@ -56,6 +57,87 @@ function dateFromIso(value?: string) {
   if (!value) return null;
   const date = new Date(`${value}T00:00:00.000Z`);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function karachiDateKey(date = new Date()) {
+  const local = new Date(date.getTime() + KARACHI_OFFSET_MS);
+  return [
+    local.getUTCFullYear(),
+    String(local.getUTCMonth() + 1).padStart(2, '0'),
+    String(local.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function currentKarachiReceivedDate(now = new Date()) {
+  return dateFromIso(karachiDateKey(now)) ?? now;
+}
+
+function automaticInvoiceDates(now = new Date()) {
+  return {
+    receivedDate: currentKarachiReceivedDate(now),
+    dueDate: calculateFinanceDueDate(now),
+  };
+}
+
+function nullableString(value: string | null | undefined) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function extractedRecord(value: Prisma.JsonValue | null | undefined) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function extractedString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function extractedOptionalString(value: unknown) {
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function invoiceAccountFields(extracted: Prisma.JsonValue | null | undefined) {
+  const data = extractedRecord(extracted);
+  const accountSync =
+    data.accountSync && typeof data.accountSync === 'object' && !Array.isArray(data.accountSync)
+      ? (data.accountSync as Record<string, unknown>)
+      : null;
+  const vendorAccountNumber = accountSync
+    ? extractedOptionalString(accountSync.vendorAccountNumber)
+    : undefined;
+  const invoiceAccountNumber = accountSync
+    ? extractedOptionalString(accountSync.invoiceAccountNumber)
+    : undefined;
+  const accountVerificationSource = accountSync
+    ? extractedOptionalString(accountSync.accountVerificationSource)
+    : undefined;
+  return {
+    hasExplicitAccountSync: Boolean(accountSync),
+    vendorAccountNumber:
+      vendorAccountNumber !== undefined
+        ? vendorAccountNumber
+        : extractedString(data.vendorAccountNumber),
+    invoiceAccountNumber:
+      invoiceAccountNumber !== undefined
+        ? invoiceAccountNumber
+        : extractedString(data.invoiceAccountNumber),
+    accountVerificationSource:
+      accountVerificationSource !== undefined
+        ? accountVerificationSource
+        : extractedString(data.accountVerificationSource),
+  };
+}
+
+function normalizedInvoiceNumber(value: string | null | undefined) {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed || null;
 }
 
 function hasExtractedSlipFields(fields: ExtractedSlipFields) {
@@ -68,6 +150,17 @@ function missingSlipFields(fields: ExtractedSlipFields) {
     fields.invoiceDate ? null : 'invoiceDate',
     fields.amountPkr != null ? null : 'amountPkr',
   ].filter((field): field is string => Boolean(field));
+}
+
+function mergeSlipFields(
+  primary: ExtractedSlipFields,
+  fallback: ExtractedSlipFields,
+): ExtractedSlipFields {
+  return {
+    invoiceNumber: primary.invoiceNumber ?? fallback.invoiceNumber,
+    invoiceDate: primary.invoiceDate ?? fallback.invoiceDate,
+    amountPkr: primary.amountPkr ?? fallback.amountPkr,
+  };
 }
 
 function textFromOcrPayload(payload: unknown): string | null {
@@ -96,7 +189,18 @@ function textFromOcrPayload(payload: unknown): string | null {
     if (text.trim()) return text.trim();
   }
 
-  for (const key of ['output', 'message', 'messages', 'content', 'choices', 'data', 'result', 'results']) {
+  for (const key of [
+    'output',
+    'message',
+    'messages',
+    'content',
+    'choices',
+    'candidates',
+    'parts',
+    'data',
+    'result',
+    'results',
+  ]) {
     const text = textFromOcrPayload(data[key]);
     if (text) return text;
   }
@@ -106,9 +210,25 @@ function textFromOcrPayload(payload: unknown): string | null {
 
 const DEFAULT_REMAINING_DOCUMENTS = ['GRN', 'DELIVERY_NOTE', 'RECEIPT'];
 
+const DEPARTMENT_DELETABLE_TICKET_STATUSES = new Set<TicketStatus>([
+  TicketStatus.NEW_REQUEST,
+  TicketStatus.MISSING_DOCS,
+  TicketStatus.REQUESTER_PINGED,
+  TicketStatus.WAITING_FOR_DOCS,
+]);
+
+const DEPARTMENT_DELETABLE_INVOICE_STATUSES = new Set<InvoiceStatus>([
+  InvoiceStatus.UPLOADED,
+  InvoiceStatus.EXTRACTED,
+  InvoiceStatus.VENDOR_UNVERIFIED,
+  InvoiceStatus.VENDOR_VERIFIED,
+  InvoiceStatus.REJECTED,
+]);
+
 const invoiceInclude = Prisma.validator<Prisma.InvoiceInclude>()({
   vendor: true,
   department: true,
+  ticket: { select: { id: true, status: true } },
   purchaseOrder: {
     include: {
       vendor: true,
@@ -134,6 +254,28 @@ export class InvoicesService {
     private prisma: PrismaService,
     private tickets: TicketsService,
   ) {}
+
+  private async assertUniqueInvoiceNumber(
+    invoiceNumber: string | null | undefined,
+    currentInvoiceId?: string,
+  ) {
+    const normalized = normalizedInvoiceNumber(invoiceNumber);
+    if (!normalized) return null;
+
+    const duplicate = await this.prisma.invoice.findFirst({
+      where: {
+        invoiceNumber: { equals: normalized, mode: Prisma.QueryMode.insensitive },
+        ...(currentInvoiceId ? { id: { not: currentInvoiceId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new BadRequestException(
+        `Invoice number ${normalized} already exists. Duplicate invoices are not allowed.`,
+      );
+    }
+    return normalized;
+  }
 
   private async extractInvoiceSlipFields(file: Express.Multer.File): Promise<{
     fields: ExtractedSlipFields;
@@ -165,17 +307,69 @@ export class InvoicesService {
       }
     }
 
-    const configuredOcr = await this.extractWithConfiguredOcr(file, uploadedPath);
-    if (configuredOcr && hasExtractedSlipFields(configuredOcr.fields)) {
-      return configuredOcr;
+    const providerResults: Array<{
+      fields: ExtractedSlipFields;
+      source: string;
+      missing: string[];
+      error?: string;
+    }> = [];
+    let mergedFields: ExtractedSlipFields = {};
+    const addProviderResult = (
+      result: {
+        fields: ExtractedSlipFields;
+        source: string;
+        missing: string[];
+        error?: string;
+      } | null,
+    ) => {
+      if (!result) return false;
+      providerResults.push(result);
+      mergedFields = mergeSlipFields(mergedFields, result.fields);
+      return missingSlipFields(mergedFields).length === 0;
+    };
+
+    if (addProviderResult(await this.extractWithGroqVision(file, uploadedPath))) {
+      return {
+        fields: mergedFields,
+        source: providerResults.map((result) => result.source).join('+'),
+        missing: [],
+      };
     }
 
-    const openAiOcr = await this.extractWithOpenAiVision(file, uploadedPath);
-    if (openAiOcr && (hasExtractedSlipFields(openAiOcr.fields) || !configuredOcr)) {
-      return openAiOcr;
+    if (addProviderResult(await this.extractWithGeminiVision(file, uploadedPath))) {
+      return {
+        fields: mergedFields,
+        source: providerResults.map((result) => result.source).join('+'),
+        missing: [],
+      };
     }
 
-    if (configuredOcr) return configuredOcr;
+    if (addProviderResult(await this.extractWithOpenAiVision(file, uploadedPath))) {
+      return {
+        fields: mergedFields,
+        source: providerResults.map((result) => result.source).join('+'),
+        missing: [],
+        error: providerResults
+          .map((result) => result.error)
+          .filter((error): error is string => Boolean(error))
+          .join('; ') || undefined,
+      };
+    }
+
+    addProviderResult(await this.extractWithConfiguredOcr(file, uploadedPath));
+
+    if (providerResults.length) {
+      const sources = providerResults.map((result) => result.source).join('+');
+      const errors = providerResults
+        .map((result) => result.error)
+        .filter((error): error is string => Boolean(error));
+      return {
+        fields: mergedFields,
+        source: sources,
+        missing: missingSlipFields(mergedFields),
+        error: errors.length ? errors.join('; ') : undefined,
+      };
+    }
 
     const fields: ExtractedSlipFields = {};
     return {
@@ -183,6 +377,68 @@ export class InvoicesService {
       source: 'manual_no_ocr_provider',
       missing: missingSlipFields(fields),
     };
+  }
+
+  private async extractWithGroqVision(
+    file: Express.Multer.File,
+    uploadedPath: string,
+  ): Promise<{
+    fields: ExtractedSlipFields;
+    source: string;
+    missing: string[];
+    error?: string;
+  } | null> {
+    const apiKey = (process.env.GROQ_API_KEY || process.env.INVOICE_GROQ_API_KEY)?.trim();
+    if (!apiKey) return null;
+
+    try {
+      const payload = await this.postImageForGroqOcr(file, uploadedPath, apiKey);
+      const fields = this.fieldsFromOcrPayload(payload);
+      return {
+        fields,
+        source: 'groq_vision',
+        missing: missingSlipFields(fields),
+      };
+    } catch (error) {
+      const fields: ExtractedSlipFields = {};
+      return {
+        fields,
+        source: 'groq_vision',
+        missing: missingSlipFields(fields),
+        error: error instanceof Error ? error.message : 'Groq vision OCR failed',
+      };
+    }
+  }
+
+  private async extractWithGeminiVision(
+    file: Express.Multer.File,
+    uploadedPath: string,
+  ): Promise<{
+    fields: ExtractedSlipFields;
+    source: string;
+    missing: string[];
+    error?: string;
+  } | null> {
+    const apiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY)?.trim();
+    if (!apiKey) return null;
+
+    try {
+      const payload = await this.postImageForGeminiOcr(file, uploadedPath, apiKey);
+      const fields = this.fieldsFromOcrPayload(payload);
+      return {
+        fields,
+        source: 'gemini_vision',
+        missing: missingSlipFields(fields),
+      };
+    } catch (error) {
+      const fields: ExtractedSlipFields = {};
+      return {
+        fields,
+        source: 'gemini_vision',
+        missing: missingSlipFields(fields),
+        error: error instanceof Error ? error.message : 'Gemini vision OCR failed',
+      };
+    }
   }
 
   private async extractWithConfiguredOcr(
@@ -227,7 +483,7 @@ export class InvoicesService {
     missing: string[];
     error?: string;
   } | null> {
-    const apiKey = process.env.OPENAI_API_KEY || process.env.INVOICE_OPENAI_API_KEY;
+    const apiKey = (process.env.OPENAI_API_KEY || process.env.INVOICE_OPENAI_API_KEY)?.trim();
     if (!apiKey) return null;
 
     try {
@@ -282,6 +538,9 @@ export class InvoicesService {
     apiKey: string,
   ) {
     const fileBuffer = await readFile(uploadedPath);
+    const imageUrl = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
+    const prompt =
+      'Extract invoice fields from this receipt image. Return only JSON with keys invoiceNumber, invoiceDate, amountPkr, rawText. invoiceDate must be YYYY-MM-DD or null. amountPkr is mandatory when any payable/total amount is visible. Prefer Payable, Net Payable, Amount Due, Total Amount, Grand Total, or Net Total over line item prices. If Payable is visible, use that value. rawText should include the visible lines around invoice number, date, total amount, and payable amount. If a field is not visible, use null.';
     const model = process.env.OPENAI_OCR_MODEL || process.env.INVOICE_OCR_MODEL || 'gpt-4.1-mini';
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -299,12 +558,11 @@ export class InvoicesService {
             content: [
               {
                 type: 'input_text',
-                text:
-                  'Extract invoice fields from this receipt image. Return only JSON with keys invoiceNumber, invoiceDate, amountPkr, rawText. invoiceDate must be YYYY-MM-DD or null. amountPkr must use Payable, Total Amount, Grand Total, or Net Payable. If a field is not visible, use null.',
+                text: prompt,
               },
               {
                 type: 'input_image',
-                image_url: `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`,
+                image_url: imageUrl,
                 detail: 'high',
               },
             ],
@@ -313,8 +571,151 @@ export class InvoicesService {
       }),
     });
 
+    if (response.ok) {
+      return this.parseOcrResponseBody(response);
+    }
+
+    const fallbackModel = process.env.OPENAI_OCR_FALLBACK_MODEL || 'gpt-4o-mini';
+    const fallback = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: fallbackModel,
+        temperature: 0,
+        max_tokens: 350,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              {
+                type: 'image_url',
+                image_url: { url: imageUrl, detail: 'high' },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!fallback.ok) {
+      throw new Error(
+        `OpenAI vision returned ${response.status}; fallback returned ${fallback.status}`,
+      );
+    }
+
+    return this.parseOcrResponseBody(fallback);
+  }
+
+  private async postImageForGroqOcr(
+    file: Express.Multer.File,
+    uploadedPath: string,
+    apiKey: string,
+  ) {
+    const fileBuffer = await readFile(uploadedPath);
+    const imageUrl = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
+    const prompt =
+      'You are an accounts payable invoice OCR agent. Read this invoice or receipt image and return only JSON. Extract invoiceNumber, invoiceDate, amountPkr, rawText, and confidence. invoiceDate must be YYYY-MM-DD or null. amountPkr must be the final payable amount when visible. Prefer Payable, Net Payable, Amount Due, Total Amount, Grand Total, or Net Total over item prices, subtotal, tax, MRP, or rate. If the payable value is visible, use that exact value. confidence must be 0 to 1.';
+    const baseUrl = process.env.GROQ_API_BASE_URL || 'https://api.groq.com/openai/v1';
+    const model =
+      process.env.GROQ_OCR_MODEL ||
+      process.env.INVOICE_GROQ_MODEL ||
+      'meta-llama/llama-4-scout-17b-16e-instruct';
+
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 500,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              {
+                type: 'image_url',
+                image_url: { url: imageUrl },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
     if (!response.ok) {
-      throw new Error(`OpenAI vision returned ${response.status}`);
+      throw new Error(`Groq vision returned ${response.status}`);
+    }
+
+    return this.parseOcrResponseBody(response);
+  }
+
+  private async postImageForGeminiOcr(
+    file: Express.Multer.File,
+    uploadedPath: string,
+    apiKey: string,
+  ) {
+    const fileBuffer = await readFile(uploadedPath);
+    const baseUrl =
+      process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
+    const model = process.env.GEMINI_OCR_MODEL || process.env.INVOICE_GEMINI_MODEL || 'gemini-2.5-flash';
+    const modelPath = model.startsWith('models/') ? model : `models/${model}`;
+    const encodedModelPath = modelPath
+      .split('/')
+      .map((part) => encodeURIComponent(part))
+      .join('/');
+    const prompt =
+      'You are an accounts payable invoice OCR agent. Read this invoice or receipt image and return only JSON. Extract invoiceNumber, invoiceDate, amountPkr, rawText, and confidence. invoiceDate must be YYYY-MM-DD or null. amountPkr must be the final payable amount when visible. Prefer Payable, Net Payable, Amount Due, Total Amount, Grand Total, or Net Total over item prices, subtotal, tax, MRP, or rate. If the payable value is visible, use that exact value. confidence must be 0 to 1.';
+
+    const response = await fetch(
+      `${baseUrl.replace(/\/$/, '')}/${encodedModelPath}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: prompt },
+                {
+                  inline_data: {
+                    mime_type: file.mimetype,
+                    data: fileBuffer.toString('base64'),
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseJsonSchema: {
+              type: 'object',
+              properties: {
+                invoiceNumber: { type: ['string', 'null'] },
+                invoiceDate: { type: ['string', 'null'] },
+                amountPkr: { type: ['number', 'null'] },
+                rawText: { type: ['string', 'null'] },
+                confidence: { type: 'number' },
+              },
+              required: ['invoiceNumber', 'invoiceDate', 'amountPkr', 'rawText', 'confidence'],
+            },
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Gemini vision returned ${response.status}`);
     }
 
     return this.parseOcrResponseBody(response);
@@ -330,13 +731,18 @@ export class InvoicesService {
   }
 
   private fieldsFromOcrPayload(payload: unknown): ExtractedSlipFields {
+    let directFields: ExtractedSlipFields = {};
     if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      const directFields = parseInvoiceFieldsFromObject(payload as Record<string, unknown>);
-      if (hasExtractedSlipFields(directFields)) return directFields;
+      directFields = parseInvoiceFieldsFromObject(payload as Record<string, unknown>);
     }
 
     const ocrText = textFromOcrPayload(payload);
-    return ocrText ? parseInvoiceFieldsFromOcrOutput(ocrText) : {};
+    const textFields = ocrText ? parseInvoiceFieldsFromOcrOutput(ocrText) : {};
+    return {
+      invoiceNumber: directFields.invoiceNumber ?? textFields.invoiceNumber,
+      invoiceDate: directFields.invoiceDate ?? textFields.invoiceDate,
+      amountPkr: directFields.amountPkr ?? textFields.amountPkr,
+    };
   }
 
   async createFromUpload(
@@ -426,6 +832,9 @@ export class InvoicesService {
       status = InvoiceStatus.EXTRACTED;
     }
 
+    invoiceNumber = await this.assertUniqueInvoiceNumber(invoiceNumber);
+    const autoDates = automaticInvoiceDates();
+
     const inv = await this.prisma.invoice.create({
       data: {
         departmentId,
@@ -437,7 +846,8 @@ export class InvoicesService {
         amountPkr,
         invoiceNumber,
         invoiceDate: invoiceDate ?? undefined,
-        receivedDate: invoiceDate ?? undefined,
+        receivedDate: autoDates.receivedDate,
+        dueDate: autoDates.dueDate,
         reference,
         description,
         subtotal: amountPkr,
@@ -479,6 +889,8 @@ export class InvoicesService {
     if (!inv) return;
     const existing = await this.prisma.paymentTicket.findUnique({ where: { invoiceId } });
     const firstMilestone = this.firstPayableMilestone(inv.paymentPlan);
+    const accountFields = invoiceAccountFields(inv.extracted);
+    const internalReference = inv.reference ?? `AP-${invoiceId.slice(0, 8).toUpperCase()}`;
     const title =
       inv.invoiceNumber ??
       inv.reference ??
@@ -510,9 +922,12 @@ export class InvoicesService {
       purchaseOrderRequired: true,
       purchaseOrderVerified: false,
       invoiceNumber: inv.invoiceNumber ?? inv.reference,
-      internalReference: `AP-${invoiceId.slice(0, 8).toUpperCase()}`,
+      internalReference,
       amountPkr: ticketAmount,
       paymentMethod: PaymentMethod.BANK_PORTAL,
+      vendorAccountNumber: accountFields.vendorAccountNumber,
+      invoiceAccountNumber: accountFields.invoiceAccountNumber,
+      accountVerificationSource: accountFields.accountVerificationSource,
       accountVerificationStatus: AccountVerificationStatus.NOT_CHECKED,
       documentStatus: DocumentStatus.PENDING_REVIEW,
       missingDocuments: [],
@@ -523,6 +938,12 @@ export class InvoicesService {
     } satisfies Prisma.PaymentTicketCreateInput;
 
     if (existing) {
+      if (firstMilestone && !firstMilestone.ticketId) {
+        await this.prisma.paymentMilestone.update({
+          where: { id: firstMilestone.id },
+          data: { ticket: { connect: { id: existing.id } } },
+        });
+      }
       if (existing.status !== TicketStatus.NEW_REQUEST) {
         return;
       }
@@ -536,8 +957,12 @@ export class InvoicesService {
           vendorNameSnapshot: inv.vendor?.displayName ?? null,
           purchaseOrderNumber: inv.purchaseOrder?.poNumber,
           invoiceNumber: inv.invoiceNumber ?? inv.reference,
+          internalReference,
           billType,
           amountPkr: ticketAmount,
+          vendorAccountNumber: accountFields.vendorAccountNumber,
+          invoiceAccountNumber: accountFields.invoiceAccountNumber,
+          accountVerificationSource: accountFields.accountVerificationSource,
           notes: inv.description ?? existing.notes,
         },
       });
@@ -576,6 +1001,13 @@ export class InvoicesService {
           fileSize: BigInt(0),
           uploadedBy: { connect: { id: submittedById } },
         },
+      });
+    }
+
+    if (firstMilestone && !firstMilestone.ticketId) {
+      await this.prisma.paymentMilestone.update({
+        where: { id: firstMilestone.id },
+        data: { ticket: { connect: { id: ticket.id } } },
       });
     }
   }
@@ -1264,6 +1696,14 @@ export class InvoicesService {
         throw new ForbiddenException('Invoice is outside your department scope');
       }
       if (
+        dto.subtotal !== undefined ||
+        dto.taxAmount !== undefined ||
+        dto.withholdingTax !== undefined ||
+        dto.totalAmount !== undefined
+      ) {
+        throw new ForbiddenException('Subtotal, tax, withholding, and total fields are finance-only');
+      }
+      if (
         !([
           InvoiceStatus.UPLOADED,
           InvoiceStatus.EXTRACTED,
@@ -1288,8 +1728,17 @@ export class InvoicesService {
     }
 
     const data: Prisma.InvoiceUpdateInput = {};
-    if (dto.amountPkr != null) data.amountPkr = new Prisma.Decimal(dto.amountPkr);
-    if (dto.invoiceNumber !== undefined) data.invoiceNumber = dto.invoiceNumber;
+    if (dto.amountPkr != null) {
+      const grossAmount = new Prisma.Decimal(dto.amountPkr);
+      data.amountPkr = grossAmount;
+      if (user.role === Role.DEPT_USER) {
+        data.subtotal = grossAmount;
+        data.totalAmount = grossAmount;
+      }
+    }
+    if (dto.invoiceNumber !== undefined) {
+      data.invoiceNumber = await this.assertUniqueInvoiceNumber(dto.invoiceNumber, id);
+    }
     if (dto.reference !== undefined) data.reference = dto.reference;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.departmentId) {
@@ -1308,10 +1757,44 @@ export class InvoicesService {
       data.vendor = { connect: { id: dto.vendorId } };
       data.status = InvoiceStatus.VENDOR_VERIFIED;
     }
-    if (dto.dueDate) data.dueDate = new Date(dto.dueDate);
     if (dto.invoiceDate) data.invoiceDate = new Date(dto.invoiceDate);
-    if (dto.receivedDate) data.receivedDate = new Date(dto.receivedDate);
+    const autoDates = automaticInvoiceDates();
+    data.receivedDate = autoDates.receivedDate;
+    data.dueDate = autoDates.dueDate;
     if (dto.currency) data.currency = dto.currency;
+    if (
+      dto.vendorAccountNumber !== undefined ||
+      dto.invoiceAccountNumber !== undefined ||
+      dto.accountVerificationSource !== undefined
+    ) {
+      const existingExtracted = extractedRecord(inv.extracted);
+      const existingAccountSync =
+        existingExtracted.accountSync &&
+        typeof existingExtracted.accountSync === 'object' &&
+        !Array.isArray(existingExtracted.accountSync)
+          ? (existingExtracted.accountSync as Record<string, unknown>)
+          : {};
+      const nextAccountSync = {
+        ...existingAccountSync,
+        ...(dto.vendorAccountNumber !== undefined
+          ? { vendorAccountNumber: nullableString(dto.vendorAccountNumber) }
+          : {}),
+        ...(dto.invoiceAccountNumber !== undefined
+          ? { invoiceAccountNumber: nullableString(dto.invoiceAccountNumber) }
+          : {}),
+        ...(dto.accountVerificationSource !== undefined
+          ? { accountVerificationSource: nullableString(dto.accountVerificationSource) }
+          : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      data.extracted = {
+        ...existingExtracted,
+        vendorAccountNumber: nextAccountSync.vendorAccountNumber ?? null,
+        invoiceAccountNumber: nextAccountSync.invoiceAccountNumber ?? null,
+        accountVerificationSource: nextAccountSync.accountVerificationSource ?? null,
+        accountSync: nextAccountSync,
+      } as Prisma.InputJsonValue;
+    }
     if (dto.subtotal != null) data.subtotal = new Prisma.Decimal(dto.subtotal);
     if (dto.taxAmount != null) data.taxAmount = new Prisma.Decimal(dto.taxAmount);
     if (dto.withholdingTax != null) {
@@ -1384,12 +1867,27 @@ export class InvoicesService {
     const firstMilestone = this.firstPayableMilestone(inv.paymentPlan);
     const titleSuffix =
       firstMilestone?.kind === PaymentMilestoneKind.ADVANCE ? ' - advance payment' : '';
+    const accountFields = invoiceAccountFields(inv.extracted);
+    const internalReference = inv.reference ?? ticket.internalReference;
+    const accountSyncData = accountFields.hasExplicitAccountSync
+      ? {
+          vendorAccountNumber: accountFields.vendorAccountNumber,
+          invoiceAccountNumber: accountFields.invoiceAccountNumber,
+          accountVerificationSource: accountFields.accountVerificationSource,
+        }
+      : {
+          vendorAccountNumber: accountFields.vendorAccountNumber ?? ticket.vendorAccountNumber,
+          invoiceAccountNumber: accountFields.invoiceAccountNumber ?? ticket.invoiceAccountNumber,
+          accountVerificationSource:
+            accountFields.accountVerificationSource ?? ticket.accountVerificationSource,
+        };
 
     await this.prisma.paymentTicket.update({
       where: { id: ticket.id },
       data: {
         title: `${title}${titleSuffix}`,
         invoiceNumber: inv.invoiceNumber ?? inv.reference,
+        internalReference,
         billType: firstMilestone
           ? this.billTypeForMilestone(firstMilestone.kind)
           : ticket.billType,
@@ -1400,6 +1898,7 @@ export class InvoicesService {
           inv.vendor?.displayName ??
           ticket.vendorNameSnapshot ??
           null,
+        ...accountSyncData,
         notes: inv.description ?? ticket.notes,
       },
     });
@@ -1411,8 +1910,10 @@ export class InvoicesService {
   ) {
     const inv = await this.prisma.invoice.findUnique({ where: { id } });
     if (!inv) throw new NotFoundException();
-    if (user.role === Role.DEPT_USER && inv.departmentId !== user.departmentId) {
-      throw new ForbiddenException('Invoice is outside your department scope');
+    if (user.role === Role.DEPT_USER) {
+      throw new ForbiddenException(
+        'Department submission is handled by the AI validation agent from the ticket workflow',
+      );
     }
     if (user.role === Role.DEPT_ADMIN) {
       throw new ForbiddenException('Department admins are not part of the AP submission scope');
@@ -1503,6 +2004,119 @@ export class InvoicesService {
     return inv;
   }
 
+  async deleteDepartmentInvoice(
+    id: string,
+    user: { id: string; role: Role; departmentId: string | null },
+  ) {
+    if (user.role !== Role.DEPT_USER) {
+      throw new ForbiddenException('Only department users can delete draft department invoices');
+    }
+
+    const inv = await this.prisma.invoice.findUnique({
+      where: { id },
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            status: true,
+            parentTicketId: true,
+            childTickets: { select: { id: true }, take: 1 },
+            paymentMilestone: { select: { id: true, paymentPlanId: true } },
+          },
+        },
+        paymentPlan: { select: { id: true } },
+        purchaseOrder: { select: { id: true } },
+        paymentRecords: { select: { id: true }, take: 1 },
+        supportingDocuments: { select: { filePath: true } },
+      },
+    });
+    if (!inv) throw new NotFoundException();
+    if (!user.departmentId || inv.departmentId !== user.departmentId) {
+      throw new ForbiddenException('Invoice is outside your department scope');
+    }
+    if (inv.paymentRecords.length) {
+      throw new BadRequestException('Invoice already has payment records and cannot be deleted');
+    }
+
+    const ticket = inv.ticket;
+    if (ticket) {
+      if (!DEPARTMENT_DELETABLE_TICKET_STATUSES.has(ticket.status)) {
+        throw new BadRequestException(
+          'Invoice cannot be deleted after it has moved to finance processing',
+        );
+      }
+      if (ticket.parentTicketId || ticket.childTickets.length) {
+        throw new BadRequestException('Partial-payment tickets cannot be hard deleted');
+      }
+    } else if (!DEPARTMENT_DELETABLE_INVOICE_STATUSES.has(inv.status)) {
+      throw new BadRequestException(
+        'Invoice cannot be deleted after it has moved beyond department draft/rework',
+      );
+    }
+
+    const linkedTicketDocuments = ticket
+      ? await this.prisma.supportingDocument.findMany({
+          where: { ticketId: ticket.id },
+          select: { filePath: true },
+        })
+      : [];
+    const filePaths = [
+      inv.fileRelPath,
+      ...inv.supportingDocuments.map((doc) => doc.filePath),
+      ...linkedTicketDocuments.map((doc) => doc.filePath),
+    ];
+    const purchaseOrderId = inv.purchaseOrder?.id ?? null;
+    const paymentPlanId = inv.paymentPlan?.id ?? null;
+    const ticketId = ticket?.id ?? null;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (paymentPlanId) {
+        await tx.paymentPlan.delete({ where: { id: paymentPlanId } });
+      }
+
+      if (ticketId) {
+        if (
+          ticket?.paymentMilestone &&
+          ticket.paymentMilestone.paymentPlanId !== paymentPlanId
+        ) {
+          await tx.paymentMilestone.update({
+            where: { id: ticket.paymentMilestone.id },
+            data: { ticket: { disconnect: true } },
+          });
+        }
+        await tx.paymentTicket.delete({ where: { id: ticketId } });
+        await tx.notification.deleteMany({
+          where: {
+            OR: [{ link: `/tickets/${ticketId}` }, { link: `/invoices/${id}` }],
+          },
+        });
+        await tx.auditLog.deleteMany({
+          where: { entityId: { in: [ticketId, id] } },
+        });
+      } else {
+        await tx.notification.deleteMany({ where: { link: `/invoices/${id}` } });
+        await tx.auditLog.deleteMany({ where: { entityId: id } });
+      }
+
+      await tx.invoice.delete({ where: { id } });
+
+      if (purchaseOrderId) {
+        const [remainingInvoices, remainingPlans] = await Promise.all([
+          tx.invoice.count({ where: { poId: purchaseOrderId } }),
+          tx.paymentPlan.count({ where: { purchaseOrderId } }),
+        ]);
+        if (!remainingInvoices && !remainingPlans) {
+          await tx.purchaseOrder.delete({ where: { id: purchaseOrderId } });
+          await tx.auditLog.deleteMany({ where: { entityId: purchaseOrderId } });
+        }
+      }
+    });
+
+    await this.deleteUploadedFiles(filePaths);
+
+    return { id, deleted: true };
+  }
+
   async importFromPublishedCsvUrl(
     url: string,
     departmentId: string,
@@ -1528,8 +2142,11 @@ export class InvoicesService {
     });
     if (!department) throw new BadRequestException('Invalid department');
     const amountPkr = new Prisma.Decimal(extracted.amountPkr ?? 0);
-    const invoiceNumber = extracted.invoiceNumber ?? extracted.reference ?? null;
+    const invoiceNumber = await this.assertUniqueInvoiceNumber(
+      extracted.invoiceNumber ?? extracted.reference ?? null,
+    );
     const invoiceDate = dateFromIso(extracted.invoiceDate);
+    const autoDates = automaticInvoiceDates();
 
     const inv = await this.prisma.invoice.create({
       data: {
@@ -1539,7 +2156,8 @@ export class InvoicesService {
         amountPkr,
         invoiceNumber,
         invoiceDate: invoiceDate ?? undefined,
-        receivedDate: invoiceDate ?? undefined,
+        receivedDate: autoDates.receivedDate,
+        dueDate: autoDates.dueDate,
         reference: extracted.reference ?? invoiceNumber,
         description:
           extracted.description ?? 'Imported from published spreadsheet (CSV) URL',
@@ -1604,5 +2222,28 @@ export class InvoicesService {
     if (user.role === Role.DEPT_USER && user.departmentId !== departmentId) {
       throw new ForbiddenException('Department users can only create invoices for their own department');
     }
+  }
+
+  private async deleteUploadedFiles(filePaths: Array<string | null | undefined>) {
+    const root = resolve(uploadRoot());
+    const uniquePaths = [...new Set(filePaths.filter((path): path is string => Boolean(path)))];
+
+    await Promise.all(
+      uniquePaths.map(async (filePath) => {
+        const absolutePath = resolve(root, filePath);
+        if (
+          absolutePath !== root &&
+          !absolutePath.startsWith(`${root}\\`) &&
+          !absolutePath.startsWith(`${root}/`)
+        ) {
+          return;
+        }
+        try {
+          await unlink(absolutePath);
+        } catch {
+          // Database cleanup is authoritative; missing files should not fail the delete request.
+        }
+      }),
+    );
   }
 }

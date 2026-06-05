@@ -6,7 +6,23 @@ import { api } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 
 type Department = { id: string; name: string };
-type Vendor = { id: string; displayName: string; kind: string };
+type Vendor = {
+  id: string;
+  displayName: string;
+  kind: string;
+  vendorCode?: string | null;
+  legalName?: string | null;
+  taxNumber?: string | null;
+  ntn?: string | null;
+  strn?: string | null;
+  bankName?: string | null;
+  bankAccountTitle?: string | null;
+  bankAccountNumber?: string | null;
+  iban?: string | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
 type Assignee = { id: string; name: string; email: string; role: string };
 
 type TicketDetail = {
@@ -447,6 +463,21 @@ function human(value: string) {
   return value.replaceAll('_', ' ').toLowerCase();
 }
 
+function badgeTone(value: string | null | undefined) {
+  const normalized = (value ?? '').toUpperCase();
+  if (normalized === 'UNKNOWN' || normalized === 'NOT_READY') return 'badge badge-rose';
+  if (normalized === 'FAILED' || normalized === 'MISMATCH' || normalized === 'INCOMPLETE') {
+    return 'badge badge-rose';
+  }
+  if (normalized === 'COMPLETE' || normalized === 'EXECUTED' || normalized === 'PAID_MARKED') {
+    return 'badge badge-emerald';
+  }
+  if (normalized === 'READY_TO_SYNC' || normalized === 'READY_FOR_UPLOAD') {
+    return 'badge badge-amber';
+  }
+  return 'badge';
+}
+
 function displayPersonName(name: string | undefined | null) {
   return name === 'AP Clerk' ? 'AP Finance' : name ?? 'System';
 }
@@ -592,6 +623,9 @@ function saveMessage(payload: Record<string, unknown>, updated?: TicketDetail) {
   if (updated?.status === 'WAITING_FOR_DOCS' && payload.status === undefined) {
     return 'AI validation saved the ticket in draft/rework with missing requirements.';
   }
+  if (updated?.status === 'PAYMENT_COMPLETE' && payload.status === 'BANK_EXECUTION_PENDING') {
+    return 'CFO signed successfully. Payment gateway executed, Xero marked paid, requester notified, and ticket closed.';
+  }
   if (payload.status === 'BANK_EXECUTION_PENDING') return 'CFO sign recorded successfully.';
   if (payload.status === 'BANK_EXECUTED') return 'Bank execution recorded successfully.';
   if (payload.status === 'REQUESTER_NOTIFIED') return 'Requester notification recorded successfully.';
@@ -612,6 +646,7 @@ export function TicketDetailPage() {
   const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState('');
+  const [cfoRejectReason, setCfoRejectReason] = useState('');
   const scopeKey = user?.id ?? 'anonymous';
 
   const { data: ticket, isLoading, error } = useQuery({
@@ -796,6 +831,29 @@ export function TicketDetailPage() {
     },
   });
 
+  const cfoReject = useMutation({
+    mutationFn: async (reason: string) => {
+      const { data } = await api.post<TicketDetail>(`/api/tickets/${id}/cfo-reject`, {
+        reason,
+      });
+      return data;
+    },
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.setQueryData(['ticket', id, scopeKey], updated);
+      setDraft(makeDraft(updated));
+      setCfoRejectReason('');
+      setNotice({
+        type: 'success',
+        message: 'CFO rejection sent to department rework successfully.',
+      });
+    },
+    onError: (mutationError) => {
+      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
+    },
+  });
+
   const uploadAttachment = useMutation({
     mutationFn: async (file: File) => {
       const fd = new FormData();
@@ -880,13 +938,14 @@ export function TicketDetailPage() {
   ].some(canEdit);
   const canEditCfoSign = Boolean(
     !isClosed &&
-      (isCompanyAdmin ||
-        (isCfo && ticket.status === 'CFO_SIGN_PENDING' && canEdit('bankPaymentStatus'))),
+      isCfo &&
+      ticket.status === 'CFO_SIGN_PENDING' &&
+      canEdit('bankPaymentStatus'),
   );
   const canUseXeroActions = Boolean(!isClosed && (isCompanyAdmin || isAp));
   const canCreateXeroBill = Boolean(canUseXeroActions && ticket.status === 'XERO_BILL_ENTRY');
   const canMarkPaidInXero = Boolean(canUseXeroActions && ticket.status === 'BANK_EXECUTED');
-  const canSaveTicket = Boolean(!isClosed && editableFields.size > 0);
+  const canSaveTicket = Boolean(!isClosed && !isCfo && editableFields.size > 0);
   const canUploadAttachment = Boolean(
     !isClosed &&
       (isCompanyAdmin ||
@@ -1002,6 +1061,16 @@ export function TicketDetailPage() {
     runTestBankAutomation.mutate();
   }
 
+  function rejectByCfo() {
+    const reason = cfoRejectReason.trim();
+    if (!reason) {
+      setNotice({ type: 'error', message: 'CFO rejection reason is required.' });
+      return;
+    }
+    setNotice(null);
+    cfoReject.mutate(reason);
+  }
+
   function attachFile(event: FormEvent) {
     event.preventDefault();
     if (!attachmentFile) return;
@@ -1106,7 +1175,7 @@ export function TicketDetailPage() {
                 {human(ticket.paymentMilestone.paymentPlan.status)}
               </p>
             </div>
-            <span className="badge badge-indigo">
+            <span className={badgeTone(ticket.paymentMilestone.paymentPlan.aiVerificationStatus)}>
               AI {human(ticket.paymentMilestone.paymentPlan.aiVerificationStatus)}{' '}
               {ticket.paymentMilestone.paymentPlan.aiVerificationScore}%
             </span>
@@ -1245,25 +1314,45 @@ export function TicketDetailPage() {
         </article>
       </section>
 
-      {ticket.status === 'CFO_SIGN_PENDING' || isCfo ? (
+      {isCfo && ticket.status === 'CFO_SIGN_PENDING' ? (
         <section className="ticket-panel ticket-cfo-panel">
           <div>
             <h3>CFO bank authorization</h3>
             <p className="muted">
               CFO opens the sign-pending ticket from the board, verifies the bank portal payment,
-              signs it, then the ticket returns to AP for bank execution and Xero close.
+              signs it, then the payment gateway, Xero paid marker, requester notification, and close
+              steps run automatically.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() =>
-              moveTicketStatus('BANK_EXECUTION_PENDING', { bankPaymentStatus: 'CFO_SIGNED' })
-            }
-            disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING' || update.isPending}
-          >
-            Record CFO sign
-          </button>
+          <div className="cfo-action-stack">
+            <textarea
+              rows={3}
+              value={cfoRejectReason}
+              onChange={(event) => setCfoRejectReason(event.target.value)}
+              placeholder="Reason if rejecting this payment"
+              disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING'}
+            />
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() =>
+                  moveTicketStatus('BANK_EXECUTION_PENDING', { bankPaymentStatus: 'CFO_SIGNED' })
+                }
+                disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING' || update.isPending}
+              >
+                Sign and auto close
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={rejectByCfo}
+                disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING' || cfoReject.isPending}
+              >
+                Reject to department
+              </button>
+            </div>
+          </div>
         </section>
       ) : null}
 

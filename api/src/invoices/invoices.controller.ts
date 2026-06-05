@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -33,8 +33,17 @@ export class InvoicesController {
     return this.invoices.patchInvoice(id, dto, req.user);
   }
 
+  @Delete(':id')
+  @Roles(Role.DEPT_USER)
+  delete(
+    @Param('id') id: string,
+    @Req() req: { user: { id: string; role: Role; departmentId: string | null } },
+  ) {
+    return this.invoices.deleteDepartmentInvoice(id, req.user);
+  }
+
   @Post(':id/submit-approval')
-  @Roles(Role.COMPANY_ADMIN, Role.DEPT_USER)
+  @Roles(Role.COMPANY_ADMIN)
   submit(
     @Param('id') id: string,
     @Req() req: { user: { id: string; role: Role; departmentId: string | null } },

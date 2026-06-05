@@ -1,13 +1,36 @@
 import type { FormEvent } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AxiosError } from 'axios';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 
 type Dept = { id: string; name: string };
-type Vendor = { id: string; displayName: string; kind: string };
+type Vendor = {
+  id: string;
+  displayName: string;
+  kind: string;
+  vendorCode?: string | null;
+  legalName?: string | null;
+  taxNumber?: string | null;
+  ntn?: string | null;
+  strn?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  bankName?: string | null;
+  bankAccountTitle?: string | null;
+  bankAccountNumber?: string | null;
+  iban?: string | null;
+  swiftCode?: string | null;
+  currency?: string | null;
+  paymentTermsDays?: number | null;
+  withholdingTaxRate?: string | null;
+};
 type Notice = { type: 'success' | 'error'; text: string } | null;
 
 type PurchaseOrderSummary = {
@@ -44,6 +67,7 @@ type InvoiceDetail = {
   vendorId: string | null;
   department: { name: string };
   vendor: Vendor | null;
+  ticket: { id: string; status: string } | null;
   purchaseOrder: PurchaseOrderSummary | null;
   paymentPlan: {
     id: string;
@@ -94,6 +118,18 @@ const payableStatuses = new Set([
   'PAYMENT_FAILED',
   'PAYMENT_EXPIRED',
 ]);
+
+function badgeTone(value: string | null | undefined) {
+  const normalized = (value ?? '').toUpperCase();
+  if (normalized === 'UNKNOWN' || normalized === 'NOT_READY') return 'badge badge-rose';
+  if (normalized === 'FAILED' || normalized === 'MISMATCH' || normalized === 'INCOMPLETE') {
+    return 'badge badge-rose';
+  }
+  if (normalized === 'PAID' || normalized === 'APPROVED' || normalized === 'COMPLETE') {
+    return 'badge badge-emerald';
+  }
+  return 'badge';
+}
 const departmentEditableStatuses = new Set([
   'UPLOADED',
   'EXTRACTED',
@@ -101,10 +137,45 @@ const departmentEditableStatuses = new Set([
   'VENDOR_VERIFIED',
   'REJECTED',
 ]);
+const departmentDeletableTicketStatuses = new Set([
+  'NEW_REQUEST',
+  'MISSING_DOCS',
+  'REQUESTER_PINGED',
+  'WAITING_FOR_DOCS',
+]);
+
+function extractedText(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function invoiceAccountDefaults(extracted: unknown) {
+  if (!extracted || typeof extracted !== 'object' || Array.isArray(extracted)) {
+    return {
+      vendorAccountNumber: '',
+      invoiceAccountNumber: '',
+      accountVerificationSource: '',
+    };
+  }
+  const data = extracted as Record<string, unknown>;
+  const sync =
+    data.accountSync && typeof data.accountSync === 'object' && !Array.isArray(data.accountSync)
+      ? (data.accountSync as Record<string, unknown>)
+      : {};
+  return {
+    vendorAccountNumber:
+      extractedText(sync.vendorAccountNumber) || extractedText(data.vendorAccountNumber),
+    invoiceAccountNumber:
+      extractedText(sync.invoiceAccountNumber) || extractedText(data.invoiceAccountNumber),
+    accountVerificationSource:
+      extractedText(sync.accountVerificationSource) ||
+      extractedText(data.accountVerificationSource),
+  };
+}
 export function InvoiceDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [notice, setNotice] = useState<Notice>(null);
 
   const { data: inv, isError, isLoading } = useQuery({
@@ -182,6 +253,27 @@ export function InvoiceDetailPage() {
     },
   });
 
+  const deleteInvoice = useMutation({
+    mutationFn: async () => {
+      await api.delete(`/api/invoices/${id}`);
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['invoices'] });
+      await qc.invalidateQueries({ queryKey: ['tickets'] });
+      await qc.invalidateQueries({ queryKey: ['ticket-board'] });
+      navigate('/invoices', {
+        state: { notice: 'Invoice deleted successfully.' },
+        replace: true,
+      });
+    },
+    onError: (error: unknown) => {
+      setNotice({
+        type: 'error',
+        text: errorMessage(error, 'Invoice could not be deleted.'),
+      });
+    },
+  });
+
   const isDepartmentOwner =
     user?.role === 'DEPT_USER' && !!inv && user.departmentId === inv.departmentId;
   const canFinanceEdit =
@@ -190,8 +282,14 @@ export function InvoiceDetailPage() {
   const canEdit =
     canFinanceEdit ||
     (isDepartmentOwner && !!inv?.status && departmentEditableStatuses.has(inv.status));
+  const canDeleteInvoice =
+    isDepartmentOwner &&
+    !!inv &&
+    (inv.ticket
+      ? departmentDeletableTicketStatuses.has(inv.ticket.status)
+      : departmentEditableStatuses.has(inv.status));
   const canSubmitApproval =
-    ((user?.role === 'DEPT_USER' && isDepartmentOwner) || user?.role === 'COMPANY_ADMIN') &&
+    user?.role === 'COMPANY_ADMIN' &&
     inv?.status === 'VENDOR_VERIFIED' &&
     !!inv.vendorId &&
     Number(inv.amountPkr) > 0;
@@ -208,6 +306,7 @@ export function InvoiceDetailPage() {
         vendors={vendors ?? []}
         saving={patch.isPending}
         lockDepartment={user?.role === 'DEPT_USER'}
+        lockFinanceFields={user?.role === 'DEPT_USER'}
         title={
           user?.role === 'DEPT_USER'
             ? 'Complete invoice details'
@@ -249,7 +348,7 @@ export function InvoiceDetailPage() {
       <div className="card">
         <p>
           <strong>Amount:</strong> {pkr.format(Number(inv.amountPkr))}{' '}
-          <span className="badge">{inv.status.replaceAll('_', ' ')}</span>
+          <span className={badgeTone(inv.status)}>{inv.status.replaceAll('_', ' ')}</span>
         </p>
         <p>
           <strong>Department:</strong> {inv.department.name}
@@ -257,6 +356,7 @@ export function InvoiceDetailPage() {
         <p>
           <strong>Vendor:</strong> {inv.vendor?.displayName ?? 'Not linked'}
         </p>
+        <VendorDetails vendor={inv.vendor} amountPkr={inv.amountPkr} />
         {inv.invoiceNumber ? (
           <p>
             <strong>Invoice number:</strong> {inv.invoiceNumber}
@@ -287,6 +387,33 @@ export function InvoiceDetailPage() {
           </pre>
         </details>
       </div>
+
+      {canDeleteInvoice ? (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Delete draft invoice</h3>
+          <p className="muted">
+            This invoice is still in department draft/rework. Deleting it will also remove the
+            linked department ticket, synced PO/payment plan draft, and uploaded draft documents.
+          </p>
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={deleteInvoice.isPending}
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Delete this draft invoice and its linked department ticket completely?',
+                )
+              ) {
+                setNotice(null);
+                deleteInvoice.mutate();
+              }
+            }}
+          >
+            {deleteInvoice.isPending ? 'Deleting...' : 'Delete invoice'}
+          </button>
+        </div>
+      ) : null}
 
       {canEdit ? editForm : null}
       {!canEdit && isDepartmentOwner ? (
@@ -360,6 +487,7 @@ function EditInvoiceForm({
   vendors,
   saving,
   lockDepartment,
+  lockFinanceFields,
   title,
   onSave,
 }: {
@@ -368,6 +496,7 @@ function EditInvoiceForm({
   vendors: Vendor[];
   saving: boolean;
   lockDepartment: boolean;
+  lockFinanceFields: boolean;
   title: string;
   onSave: (body: Record<string, unknown>) => void;
 }) {
@@ -400,10 +529,26 @@ function EditInvoiceForm({
       ? invoice.paymentPlan.requiredFinalDocuments.join('\n')
       : 'GRN\nDELIVERY_NOTE\nRECEIPT',
   );
+  const accountDefaults = invoiceAccountDefaults(invoice.extracted);
+  const [vendorAccountNumber, setVendorAccountNumber] = useState(
+    accountDefaults.vendorAccountNumber || invoice.vendor?.bankAccountNumber || '',
+  );
+  const [invoiceAccountNumber, setInvoiceAccountNumber] = useState(
+    accountDefaults.invoiceAccountNumber,
+  );
+  const [accountVerificationSource, setAccountVerificationSource] = useState(
+    accountDefaults.accountVerificationSource,
+  );
+  const selectedVendor = vendors.find((vendor) => vendor.id === vendorId) ?? invoice.vendor;
+
+  useEffect(() => {
+    setReceivedDate(toDateInput(invoice.receivedDate));
+    setDueDate(toDateInput(invoice.dueDate));
+  }, [invoice.id, invoice.receivedDate, invoice.dueDate]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    onSave({
+    const body: Record<string, unknown> = {
       amountPkr: Number(amountPkr),
       invoiceNumber: invoiceNumber || undefined,
       reference: reference || undefined,
@@ -411,13 +556,10 @@ function EditInvoiceForm({
       departmentId,
       vendorId: vendorId || undefined,
       invoiceDate: invoiceDate || undefined,
-      receivedDate: receivedDate || undefined,
-      dueDate: dueDate || undefined,
       currency,
-      subtotal: Number(subtotal || 0),
-      taxAmount: Number(taxAmount || 0),
-      withholdingTax: Number(withholdingTax || 0),
-      totalAmount: Number(totalAmount || amountPkr || 0),
+      vendorAccountNumber,
+      invoiceAccountNumber,
+      accountVerificationSource,
       paymentPlanType,
       advancePercent:
         paymentPlanType === 'ADVANCE_REMAINING' ? Number(advancePercent || 50) : undefined,
@@ -430,7 +572,16 @@ function EditInvoiceForm({
               .map((item) => item.trim())
               .filter(Boolean)
           : undefined,
-    });
+    };
+
+    if (!lockFinanceFields) {
+      body.subtotal = Number(subtotal || 0);
+      body.taxAmount = Number(taxAmount || 0);
+      body.withholdingTax = Number(withholdingTax || 0);
+      body.totalAmount = Number(totalAmount || amountPkr || 0);
+    }
+
+    onSave(body);
   }
 
   return (
@@ -486,12 +637,12 @@ function EditInvoiceForm({
             <input
               type="date"
               value={receivedDate}
-              onChange={(e) => setReceivedDate(e.target.value)}
+              disabled
             />
           </div>
           <div className="field">
             <label>Due date</label>
-            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            <input type="date" value={dueDate} disabled />
           </div>
           <div className="field">
             <label>PO number</label>
@@ -503,7 +654,7 @@ function EditInvoiceForm({
           </div>
           <div className="field">
             <label>PO expected date</label>
-            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            <input type="date" value={dueDate} disabled />
           </div>
           <div className="field">
             <label>Currency</label>
@@ -522,6 +673,7 @@ function EditInvoiceForm({
               step={0.01}
               value={subtotal}
               onChange={(e) => setSubtotal(e.target.value)}
+              disabled={lockFinanceFields}
             />
           </div>
           <div className="field">
@@ -532,6 +684,7 @@ function EditInvoiceForm({
               step={0.01}
               value={taxAmount}
               onChange={(e) => setTaxAmount(e.target.value)}
+              disabled={lockFinanceFields}
             />
           </div>
           <div className="field">
@@ -542,6 +695,7 @@ function EditInvoiceForm({
               step={0.01}
               value={withholdingTax}
               onChange={(e) => setWithholdingTax(e.target.value)}
+              disabled={lockFinanceFields}
             />
           </div>
           <div className="field">
@@ -552,6 +706,7 @@ function EditInvoiceForm({
               step={0.01}
               value={totalAmount}
               onChange={(e) => setTotalAmount(e.target.value)}
+              disabled={lockFinanceFields}
             />
           </div>
           <div className="field">
@@ -570,7 +725,20 @@ function EditInvoiceForm({
           </div>
           <div className="field">
             <label>Vendor</label>
-            <select value={vendorId} onChange={(e) => setVendor(e.target.value)}>
+            <select
+              value={vendorId}
+              onChange={(e) => {
+                const nextVendorId = e.target.value;
+                const nextVendor = vendors.find((vendor) => vendor.id === nextVendorId);
+                setVendor(nextVendorId);
+                if (!vendorAccountNumber && nextVendor?.bankAccountNumber) {
+                  setVendorAccountNumber(nextVendor.bankAccountNumber);
+                }
+                if (!accountVerificationSource && nextVendor?.bankAccountNumber) {
+                  setAccountVerificationSource('Vendor master account selected on invoice detail');
+                }
+              }}
+            >
               <option value="">Select vendor...</option>
               {vendors.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -578,6 +746,31 @@ function EditInvoiceForm({
                 </option>
               ))}
             </select>
+          </div>
+          <VendorDetails vendor={selectedVendor} amountPkr={amountPkr} compact />
+          <div className="field">
+            <label>Vendor account number</label>
+            <input
+              value={vendorAccountNumber}
+              onChange={(e) => setVendorAccountNumber(e.target.value)}
+              placeholder="Vendor master/bank account number"
+            />
+          </div>
+          <div className="field">
+            <label>Invoice account number</label>
+            <input
+              value={invoiceAccountNumber}
+              onChange={(e) => setInvoiceAccountNumber(e.target.value)}
+              placeholder="Account number visible on invoice or manually verified"
+            />
+          </div>
+          <div className="field ticket-wide-field">
+            <label>Account verification proof/source</label>
+            <input
+              value={accountVerificationSource}
+              onChange={(e) => setAccountVerificationSource(e.target.value)}
+              placeholder="Legacy sheet row, vendor master, email proof, or manual verification note"
+            />
           </div>
           <div className="field ticket-wide-field">
             <label>Description / PO notes / expense detail</label>
@@ -654,6 +847,63 @@ function toDateInput(value: string | null | undefined) {
   return value.slice(0, 10);
 }
 
+function VendorDetails({
+  vendor,
+  amountPkr,
+  compact = false,
+}: {
+  vendor: Vendor | null;
+  amountPkr: string;
+  compact?: boolean;
+}) {
+  if (!vendor) {
+    return (
+      <div className={compact ? 'vendor-details vendor-details-compact ticket-wide-field' : 'vendor-details'}>
+        <strong>Vendor details</strong>
+        <span className="muted">Vendor is not linked yet. Select a vendor to show bank, tax, and contact details.</span>
+      </div>
+    );
+  }
+
+  const rows = [
+    ['Vendor code', vendor.vendorCode],
+    ['Legal name', vendor.legalName],
+    ['Kind', vendor.kind?.replaceAll('_', ' ').toLowerCase()],
+    ['Tax number', vendor.taxNumber],
+    ['NTN', vendor.ntn],
+    ['STRN', vendor.strn],
+    ['Bank', vendor.bankName],
+    ['Account title', vendor.bankAccountTitle],
+    ['Account number', vendor.bankAccountNumber],
+    ['IBAN', vendor.iban],
+    ['SWIFT', vendor.swiftCode],
+    ['Contact', vendor.contactPerson],
+    ['Phone', vendor.phone],
+    ['Email', vendor.email],
+    ['City', vendor.city],
+    ['Terms', vendor.paymentTermsDays != null ? `${vendor.paymentTermsDays} days` : null],
+    ['WHT rate', vendor.withholdingTaxRate ? `${vendor.withholdingTaxRate}%` : null],
+  ].filter(([, value]) => Boolean(value));
+
+  return (
+    <div className={compact ? 'vendor-details vendor-details-compact ticket-wide-field' : 'vendor-details'}>
+      <div className="vendor-details-header">
+        <strong>{vendor.displayName}</strong>
+        <span>{pkr.format(Number(amountPkr || 0))}</span>
+      </div>
+      <div className="vendor-details-grid">
+        {rows.map(([label, value]) => (
+          <span key={label}>
+            <small>{label}</small>
+            <strong>{value}</strong>
+          </span>
+        ))}
+      </div>
+      {vendor.address ? <p className="muted">{vendor.address}</p> : null}
+    </div>
+  );
+}
+
 function PaymentPlanSummary({ invoice }: { invoice: InvoiceDetail }) {
   const plan = invoice.paymentPlan;
   if (!plan) return null;
@@ -667,7 +917,7 @@ function PaymentPlanSummary({ invoice }: { invoice: InvoiceDetail }) {
             {plan.status.replaceAll('_', ' ').toLowerCase()}
           </small>
         </div>
-        <span className="badge badge-indigo">
+        <span className={badgeTone(plan.aiVerificationStatus)}>
           AI {plan.aiVerificationStatus.replaceAll('_', ' ').toLowerCase()} {plan.aiVerificationScore}%
         </span>
       </div>

@@ -15,7 +15,10 @@ import { FullScopeModule } from './full-scope/full-scope.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env', '../.env'],
+    }),
     PrismaModule,
     AuthModule,
     DepartmentsModule,

@@ -6,21 +6,17 @@ import type { Department } from '../api/client';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 
-const roles = [
-  { value: 'COMPANY_ADMIN', label: 'Company admin' },
-  { value: 'AP_CLERK', label: 'AP Finance' },
-  { value: 'DEPT_USER', label: 'Department user' },
-  { value: 'DEPT_ADMIN', label: 'Department head' },
-  { value: 'CFO', label: 'CFO' },
-];
+type RegisterMode = 'user' | 'department';
 
 export function RegisterPage() {
-  const { user, register, loading } = useAuth();
+  const { user, register, registerDepartment, loading } = useAuth();
+  const [mode, setMode] = useState<RegisterMode>('user');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [departmentId, setDepartmentId] = useState('');
-  const [role, setRole] = useState('');
+  const [departmentName, setDepartmentName] = useState('');
+  const [departmentCode, setDepartmentCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -41,9 +37,23 @@ export function RegisterPage() {
     setError('');
     setBusy(true);
     try {
-      await register({ name, email, password, departmentId, role });
+      if (mode === 'department') {
+        await registerDepartment({
+          departmentName,
+          departmentCode: departmentCode || undefined,
+          name,
+          email,
+          password,
+        });
+      } else {
+        await register({ name, email, password, departmentId });
+      }
     } catch {
-      setError('Could not register. Use a new email and complete every field.');
+      setError(
+        mode === 'department'
+          ? 'Could not register department. Use a new department name and email.'
+          : 'Could not register. Use a new email and select a department.',
+      );
     } finally {
       setBusy(false);
     }
@@ -53,31 +63,97 @@ export function RegisterPage() {
     <div className="auth-shell">
       <section className="auth-intro">
         <span className="journey-pill">Department onboarding</span>
-        <h1>Register the right AP role and keep every request department-scoped.</h1>
+        <h1>Create department users without exposing finance roles.</h1>
         <p>
-          New departments and finance users can join the same controlled workflow while
-          permissions keep invoice creation, review, payment, and reporting separated.
+          Existing departments can add more request users, and new departments like NOC
+          or IT can onboard into the same AP workflow with the same department-scoped access.
         </p>
         <div className="auth-metrics">
           <span>
-            <strong>01</strong>
-            <small>Department intake</small>
+            <strong>Role</strong>
+            <small>Department user</small>
           </span>
           <span>
-            <strong>02</strong>
-            <small>Finance control</small>
+            <strong>Scope</strong>
+            <small>Own department</small>
           </span>
           <span>
-            <strong>03</strong>
-            <small>CFO sign-off</small>
+            <strong>Flow</strong>
+            <small>Invoice to AP</small>
           </span>
         </div>
       </section>
       <div className="auth-panel">
-        <h2 style={{ marginTop: 0 }}>Register</h2>
+        <div className="auth-panel-header">
+          <span className="auth-logo-small">AP</span>
+          <div>
+            <h2>Register</h2>
+            <p>Every public registration creates a department user.</p>
+          </div>
+        </div>
+
+        <div className="segmented-control" aria-label="Registration type">
+          <button
+            type="button"
+            className={mode === 'user' ? 'active' : ''}
+            onClick={() => setMode('user')}
+          >
+            Existing department user
+          </button>
+          <button
+            type="button"
+            className={mode === 'department' ? 'active' : ''}
+            onClick={() => setMode('department')}
+          >
+            New department
+          </button>
+        </div>
+
         <form onSubmit={onSubmit}>
+          {mode === 'department' ? (
+            <div className="auth-form-grid">
+              <div className="field">
+                <label htmlFor="departmentName">Department name</label>
+                <input
+                  id="departmentName"
+                  value={departmentName}
+                  onChange={(e) => setDepartmentName(e.target.value)}
+                  placeholder="NOC, IT, Procurement"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="departmentCode">Department code</label>
+                <input
+                  id="departmentCode"
+                  value={departmentCode}
+                  onChange={(e) => setDepartmentCode(e.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="field">
+              <label htmlFor="department">Department</label>
+              <select
+                id="department"
+                value={departmentId}
+                onChange={(e) => setDepartmentId(e.target.value)}
+                disabled={departmentsLoading}
+                required
+              >
+                <option value="">Select department...</option>
+                {(departments ?? []).map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="field">
-            <label htmlFor="name">Name</label>
+            <label htmlFor="name">User name</label>
             <input
               id="name"
               autoComplete="name"
@@ -109,37 +185,15 @@ export function RegisterPage() {
               required
             />
           </div>
-          <div className="field">
-            <label htmlFor="department">Department</label>
-            <select
-              id="department"
-              value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
-              disabled={departmentsLoading}
-              required
-            >
-              <option value="">Select department...</option>
-              {(departments ?? []).map((department) => (
-                <option key={department.id} value={department.id}>
-                  {department.name}
-                </option>
-              ))}
-            </select>
+
+          <div className="role-lock">
+            <strong>Default access</strong>
+            <span>Department user, limited to the selected or newly created department.</span>
           </div>
-          <div className="field">
-            <label htmlFor="role">Role</label>
-            <select id="role" value={role} onChange={(e) => setRole(e.target.value)} required>
-              <option value="">Select role...</option>
-              {roles.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
+
           {error ? <p className="error">{error}</p> : null}
           <button type="submit" className="btn btn-primary" disabled={busy || loading}>
-            {busy ? 'Creating account…' : 'Create account'}
+            {busy ? 'Creating account...' : 'Create account'}
           </button>
         </form>
         <p className="auth-switch">

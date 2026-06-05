@@ -72,10 +72,15 @@ export function parseInvoiceFieldsFromObject(data: Record<string, unknown>): Ext
       'amount',
       'invoiceAmount',
       'totalAmount',
+      'total',
       'grandTotal',
+      'grossTotal',
       'payable',
+      'payableAmount',
       'netPayable',
+      'netAmount',
       'balanceDue',
+      'dueAmount',
     ]),
   );
 
@@ -193,15 +198,18 @@ function extractAmount(text: string): number | undefined {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const payableLine = lines.find((line) => /\b(payable|net\s*payable|amount\s*due)\b/i.test(line));
-  if (payableLine) {
-    const amounts = amountsFromLine(payableLine);
+  const payableLineIndex = lines.findIndex((line) =>
+    /\b(payable|net\s*payable|amount\s*due)\b/i.test(line),
+  );
+  if (payableLineIndex >= 0) {
+    const amounts = amountsFromWindow(lines, payableLineIndex);
     if (amounts.length) return amounts[amounts.length - 1];
   }
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     if (!amountLineKeywords.test(line)) continue;
-    const amounts = amountsFromLine(line);
+    const amounts = amountsFromWindow(lines, index);
     if (amounts.length) return amounts[amounts.length - 1];
   }
 
@@ -211,6 +219,14 @@ function extractAmount(text: string): number | undefined {
   if (currencyAmounts.length) return currencyAmounts[currencyAmounts.length - 1];
 
   return undefined;
+}
+
+function amountsFromWindow(lines: string[], index: number) {
+  const currentLineAmounts = amountsFromLine(lines[index]);
+  if (currentLineAmounts.length) return currentLineAmounts;
+
+  const windowText = lines.slice(index, index + 3).join(' ');
+  return amountsFromLine(windowText);
 }
 
 function amountsFromLine(line: string) {

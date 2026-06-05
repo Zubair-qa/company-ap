@@ -28,7 +28,7 @@ export class InvoiceFilesController {
   constructor(private invoices: InvoicesService) {}
 
   @Post('upload')
-  @Roles(Role.COMPANY_ADMIN, Role.DEPT_USER)
+  @Roles(Role.DEPT_USER)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({

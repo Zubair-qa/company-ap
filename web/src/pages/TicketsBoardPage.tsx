@@ -32,6 +32,20 @@ type Ticket = {
   whtFilerStatus: string;
   statusLabel?: string;
   availableTransitions?: string[];
+  paymentMilestone?: {
+    label: string;
+    kind: string;
+    status: string;
+    amount: string;
+    paymentPlan: {
+      planNumber: string;
+      planType: string;
+      status: string;
+      totalAmount: string;
+      paidAmount: string;
+      remainingAmount: string;
+    };
+  } | null;
 };
 
 type BoardColumn = {
@@ -57,7 +71,7 @@ type Notice = {
 
 const statusLabels: Record<string, string> = {
   NEW_REQUEST: 'New request',
-  DEPARTMENT_HEAD_APPROVAL: 'Department head approval',
+  ADVANCE_PAID_REMAINING_PENDING: 'Advance paid / remaining proof',
   DOCS_REVIEW: 'Docs review',
   MISSING_DOCS: 'Missing docs',
   REQUESTER_PINGED: 'Requester pinged',
@@ -67,7 +81,7 @@ const statusLabels: Record<string, string> = {
   VOUCHER_GENERATION: 'Voucher',
   XERO_BILL_ENTRY: 'Xero bill',
   PAYMENT_PREPARATION: 'Payment prep',
-  BANK_UPLOAD: 'Bank upload',
+  BANK_UPLOAD: 'AP finance final review',
   CFO_SIGN_PENDING: 'CFO sign',
   BANK_EXECUTION_PENDING: 'Bank execution',
   BANK_EXECUTED: 'Bank executed',
@@ -83,6 +97,22 @@ const priorityLabels: Record<string, string> = {
   URGENT: 'Urgent',
 };
 
+const departmentAgentStatuses = [
+  'NEW_REQUEST',
+  'MISSING_DOCS',
+  'REQUESTER_PINGED',
+  'WAITING_FOR_DOCS',
+  'ADVANCE_PAID_REMAINING_PENDING',
+];
+const agentOwnedStatuses = [
+  'DOCS_REVIEW',
+  'VENDOR_PO_ACCOUNT_VERIFICATION',
+  'WHT_CALCULATION',
+  'VOUCHER_GENERATION',
+  'XERO_BILL_ENTRY',
+  'PAYMENT_PREPARATION',
+];
+
 const pkr = new Intl.NumberFormat('en-PK', {
   style: 'currency',
   currency: 'PKR',
@@ -96,6 +126,25 @@ const compactDate = new Intl.DateTimeFormat('en-PK', {
 
 function human(value: string) {
   return value.replaceAll('_', ' ').toLowerCase();
+}
+
+function badgeTone(value: string | null | undefined) {
+  const normalized = (value ?? '').toUpperCase();
+  if (normalized === 'UNKNOWN' || normalized === 'NOT_READY') return 'badge badge-rose';
+  if (normalized === 'FAILED' || normalized === 'MISMATCH' || normalized === 'INCOMPLETE') {
+    return 'badge badge-rose';
+  }
+  if (normalized === 'COMPLETE' || normalized === 'EXECUTED' || normalized === 'PAID_MARKED') {
+    return 'badge badge-emerald';
+  }
+  if (normalized === 'READY_TO_SYNC' || normalized === 'READY_FOR_UPLOAD') {
+    return 'badge badge-amber';
+  }
+  return 'badge';
+}
+
+function displayPersonName(name: string | undefined | null) {
+  return name === 'AP Clerk' ? 'AP Finance' : name ?? 'Unassigned';
 }
 
 function money(value: string | number) {
@@ -123,6 +172,21 @@ function apiErrorMessage(error: unknown) {
   const message = maybe.response?.data?.message;
   if (Array.isArray(message)) return message.join(', ');
   return message ?? maybe.response?.data?.error ?? maybe.message ?? 'Request failed.';
+}
+
+function agentCardNote(ticket: Ticket) {
+  if (departmentAgentStatuses.includes(ticket.status)) {
+    return ticket.missingDocuments.length
+      ? 'AI is holding this in department draft/rework until missing proof is added.'
+      : 'AI validates this after department save or attachment upload.';
+  }
+  if (agentOwnedStatuses.includes(ticket.status)) {
+    return 'AI verification owns this stage and will move it automatically.';
+  }
+  if (ticket.status === 'BANK_UPLOAD') {
+    return 'Ready for AP Finance final review before CFO sign.';
+  }
+  return null;
 }
 
 export function TicketsBoardPage() {
@@ -183,7 +247,7 @@ export function TicketsBoardPage() {
           ticket.vendorNameSnapshot,
           ticket.invoiceNumber,
           ticket.internalReference,
-          ticket.assignedTo?.name,
+          displayPersonName(ticket.assignedTo?.name),
         ]
           .filter(Boolean)
           .join(' ')
@@ -194,6 +258,7 @@ export function TicketsBoardPage() {
   }, [board, query]);
 
   if (!user) return null;
+  const isDepartmentTrackingRole = user.role === 'DEPT_USER' || user.role === 'DEPT_ADMIN';
 
   return (
     <div className="tickets-page">
@@ -204,8 +269,6 @@ export function TicketsBoardPage() {
           <p className="muted">
             {user.role === 'CFO'
               ? 'Open CFO sign pending tickets, verify the bank portal payment, then hand execution back to AP.'
-              : user.role === 'DEPT_ADMIN'
-                ? 'Review department requests waiting for head approval. Open a card to approve or reject with a reason.'
               : 'Track every request from department submission to Xero, bank portal, and completion.'}
           </p>
         </div>
@@ -260,9 +323,21 @@ export function TicketsBoardPage() {
                   <div className="ticket-card-grid">
                     <span>{money(ticket.amountPkr)}</span>
                     <span>{human(ticket.paymentMethod)}</span>
-                    <span>{ticket.assignedTo?.name ?? 'Unassigned'}</span>
+                    <span>{displayPersonName(ticket.assignedTo?.name)}</span>
                     <span>{human(ticket.expenseNature)}</span>
                   </div>
+                  {ticket.paymentMilestone ? (
+                    <div className="payment-plan-mini">
+                      <strong>{ticket.paymentMilestone.paymentPlan.planNumber}</strong>
+                      <span>
+                        {human(ticket.paymentMilestone.kind)} / {human(ticket.paymentMilestone.status)}
+                      </span>
+                      <small>
+                        Paid {money(ticket.paymentMilestone.paymentPlan.paidAmount)} / Remaining{' '}
+                        {money(ticket.paymentMilestone.paymentPlan.remainingAmount)}
+                      </small>
+                    </div>
+                  ) : null}
                   <div className="ticket-badges">
                     <span className="badge badge-slate">
                       {ticket.statusLabel ?? labelForStatus(ticket.status)}
@@ -270,14 +345,23 @@ export function TicketsBoardPage() {
                     <span className={`badge doc-${ticket.documentStatus.toLowerCase()}`}>
                       {human(ticket.documentStatus)}
                     </span>
-                    <span className="badge">{human(ticket.xeroSyncStatus)}</span>
-                    <span className="badge">{human(ticket.bankPaymentStatus)}</span>
-                    <span className="badge">{human(ticket.whtFilerStatus)}</span>
+                    <span className={badgeTone(ticket.xeroSyncStatus)}>
+                      {human(ticket.xeroSyncStatus)}
+                    </span>
+                    <span className={badgeTone(ticket.bankPaymentStatus)}>
+                      {human(ticket.bankPaymentStatus)}
+                    </span>
+                    <span className={badgeTone(ticket.whtFilerStatus)}>
+                      {human(ticket.whtFilerStatus)}
+                    </span>
                   </div>
                   {ticket.missingDocuments.length ? (
                     <p className="missing-line">
                       Missing: {ticket.missingDocuments.slice(0, 2).join(', ')}
                     </p>
+                  ) : null}
+                  {agentCardNote(ticket) ? (
+                    <p className="agent-card-note">{agentCardNote(ticket)}</p>
                   ) : null}
                   {(ticket.availableTransitions ?? []).length ? (
                     <select
@@ -291,7 +375,9 @@ export function TicketsBoardPage() {
                         }
                       }}
                     >
-                      <option value="">Move to next scope step</option>
+                      <option value="">
+                        {ticket.status === 'BANK_UPLOAD' ? 'AP final decision' : 'Move to next scope step'}
+                      </option>
                       {(ticket.availableTransitions ?? []).map((status) => (
                         <option key={status} value={status}>
                           {labelForStatus(status)}
@@ -299,7 +385,15 @@ export function TicketsBoardPage() {
                       ))}
                     </select>
                   ) : (
-                    <span className="status-locked">No permitted move</span>
+                    <span className="status-locked">
+                      {isDepartmentTrackingRole && !departmentAgentStatuses.includes(ticket.status)
+                        ? 'Tracking only'
+                        : agentOwnedStatuses.includes(ticket.status)
+                        ? 'AI controlled'
+                        : departmentAgentStatuses.includes(ticket.status)
+                          ? 'Auto-validates'
+                          : 'No permitted move'}
+                    </span>
                   )}
                 </article>
               ))}

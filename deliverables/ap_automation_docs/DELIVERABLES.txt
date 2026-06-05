@@ -1,0 +1,18 @@
+AP Automation documentation deliverables
+
+JPG diagrams:
+- 01_business_canvas.jpg
+- 02_process_flow.jpg
+- 03_functional_architecture.jpg
+- 04_integration_diagram.jpg
+- 05_swimlane_diagram.jpg
+- 06_application_design.jpg
+- 07_old_vs_new_artifacts.jpg
+- 08_human_agent_swimlane.jpg
+
+Word documents:
+- AP_Automation_Business_Canvas.docx
+- AP_Automation_Application_Design.docx
+- AP_Automation_PRD.docx
+- AP_Automation_Agentic_AI_Detailed_PDR.docx
+- AP_Automation_Master_Pack.docx

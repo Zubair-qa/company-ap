@@ -5,6 +5,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { InvoiceDetailPage } from './pages/InvoiceDetailPage';
 import { InvoicesPage } from './pages/InvoicesPage';
 import { LoginPage } from './pages/LoginPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { OperationsPage } from './pages/OperationsPage';
 import { PaymentCancelPage, PaymentSuccessPage } from './pages/PaymentPages';
 import { RegisterPage } from './pages/RegisterPage';
@@ -23,6 +24,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<TicketsBoardPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/operations" element={<OperationsPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route path="/invoices" element={<InvoicesPage />} />

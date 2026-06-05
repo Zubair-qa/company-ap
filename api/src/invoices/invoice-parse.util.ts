@@ -1,8 +1,14 @@
 import * as XLSX from 'xlsx';
+import {
+  normalizeInvoiceDate,
+  parseInvoiceFieldsFromText,
+} from './invoice-slip-extract.util';
 
 export type ExtractedInvoice = {
   vendorName?: string;
   vendorTaxNumber?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
   reference?: string;
   amountPkr?: number;
   dueDate?: string;
@@ -11,7 +17,12 @@ export type ExtractedInvoice = {
 };
 
 function normalizeKey(k: string) {
-  return k.trim().toLowerCase().replace(/\s+/g, '_');
+  return k
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 function rowToObject(row: unknown[]): Record<string, string | number | null> {
@@ -56,21 +67,41 @@ export function parseSpreadsheetBuffer(buf: Buffer): ExtractedInvoice {
     const vendorTaxNumber =
       firstString(map, ['tax', 'tax_number', 'ntn', 'ntn_strn', 'strn']) ?? undefined;
     const reference =
-      firstString(map, ['invoice', 'invoice_no', 'reference', 'bill_no']) ?? undefined;
+      firstString(map, [
+        'invoice',
+        'invoice_no',
+        'invoice_number',
+        'reference',
+        'ref',
+        'bill_no',
+        'bill_number',
+      ]) ?? undefined;
+    const invoiceDate =
+      firstDate(map, [
+        'invoice_date',
+        'invoice_dt',
+        'bill_date',
+        'receipt_date',
+        'date',
+      ]) ?? undefined;
     const amountPkr = firstAmount(map, [
       'amount',
       'total',
       'amount_pkr',
+      'amountpkr',
       'grand_total',
+      'invoice_amount',
       'net_payable',
+      'payable_amount',
     ]);
-    const dueDate =
-      firstString(map, ['due_date', 'duedate', 'due']) ?? undefined;
+    const dueDate = firstDate(map, ['due_date', 'duedate', 'due']) ?? undefined;
     const description =
       firstString(map, ['description', 'details', 'memo']) ?? undefined;
     return {
       vendorName,
       vendorTaxNumber,
+      invoiceNumber: reference,
+      invoiceDate,
       reference,
       amountPkr: amountPkr ?? undefined,
       dueDate,
@@ -80,12 +111,16 @@ export function parseSpreadsheetBuffer(buf: Buffer): ExtractedInvoice {
   }
 
   const flat = rows.flat().filter((c) => c != null && c !== '');
+  const textFields = parseInvoiceFieldsFromText(flat.map((c) => String(c)).join('\n'));
   const amountPkr = flat
     .map((c) => (typeof c === 'number' ? c : parseMoney(String(c))))
     .find((n) => n != null && !Number.isNaN(n));
 
   return {
-    amountPkr: amountPkr ?? undefined,
+    invoiceNumber: textFields.invoiceNumber,
+    invoiceDate: textFields.invoiceDate,
+    reference: textFields.invoiceNumber,
+    amountPkr: textFields.amountPkr ?? amountPkr ?? undefined,
     sheetPreview: preview,
   };
 }
@@ -111,6 +146,26 @@ function firstAmount(
     if (typeof v === 'string') {
       const n = parseMoney(v);
       if (n != null) return n;
+    }
+  }
+  return null;
+}
+
+function firstDate(
+  map: Record<string, string | number | null>,
+  keys: string[],
+): string | null {
+  for (const k of keys) {
+    const v = map[k];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      const parsed = XLSX.SSF.parse_date_code(v);
+      if (!parsed) continue;
+      const normalized = normalizeInvoiceDate(`${parsed.d}/${parsed.m}/${parsed.y}`);
+      if (normalized) return normalized;
+    }
+    if (typeof v === 'string') {
+      const normalized = normalizeInvoiceDate(v);
+      if (normalized) return normalized;
     }
   }
   return null;

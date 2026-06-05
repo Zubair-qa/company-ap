@@ -8,7 +8,11 @@ import {
   InvoiceStatus,
   PaymentMethod,
   PaymentBatchStatus,
+  PaymentMilestoneKind,
+  PaymentMilestoneStatus,
   PaymentRecordStatus,
+  PaymentPlanStatus,
+  PaymentPlanType,
   Prisma,
   PrismaClient,
   PurchaseOrderStatus,
@@ -77,14 +81,14 @@ async function main() {
   const apClerk = await prisma.user.upsert({
     where: { email: 'ap@demo.local' },
     update: {
-      name: 'AP Clerk',
+      name: 'AP Finance',
       passwordHash,
       role: Role.AP_CLERK,
       departmentId: finance.id,
     },
     create: {
       email: 'ap@demo.local',
-      name: 'AP Clerk',
+      name: 'AP Finance',
       passwordHash,
       role: Role.AP_CLERK,
       departmentId: finance.id,
@@ -633,15 +637,15 @@ async function main() {
     {
       id: '30000000-0000-0000-0000-000000000004',
       title: 'ENG-2026-088 - CloudHost remaining 50%',
-      status: TicketStatus.DOCS_REVIEW,
+      status: TicketStatus.ADVANCE_PAID_REMAINING_PENDING,
       priority: TicketPriority.HIGH,
       requesterName: 'Engineering requester',
       requesterEmail: 'requester.eng@demo.local',
       departmentId: engineering.id,
       assignedToId: apClerk.id,
       createdById: engineeringAdmin.id,
-      submittedToFinanceAt: new Date('2026-05-19T12:20:00.000Z'),
-      dueDate: new Date('2026-05-23T13:00:00.000Z'),
+      submittedToFinanceAt: null,
+      dueDate: null,
       expenseNature: ExpenseNature.CAPEX,
       billType: BillType.FINAL_PARTIAL,
       vendorId: cloudHost.id,
@@ -658,7 +662,7 @@ async function main() {
       accountVerificationStatus: AccountVerificationStatus.INVOICE_MISSING_VERIFIED_FROM_SHEET,
       accountVerificationSource: 'Remaining payment references old sheet row 101',
       documentStatus: DocumentStatus.PENDING_REVIEW,
-      missingDocuments: [],
+      missingDocuments: ['GRN / delivery note / receipt proof'],
       xeroSyncStatus: XeroSyncStatus.NOT_READY,
       whtFilerStatus: FilerStatus.FILER,
       whtRate: '4.5',
@@ -673,7 +677,7 @@ async function main() {
       oldReference: 'OLD-ENG-088-A',
       parentTicketId: '30000000-0000-0000-0000-000000000003',
       invoiceId: '20000000-0000-0000-0000-000000000002',
-      notes: 'Remaining 50% linked back to the paid advance ticket.',
+      notes: 'Advance is paid. Department must attach receiving proof before this goes back to finance.',
     },
     {
       id: '30000000-0000-0000-0000-000000000005',
@@ -796,6 +800,106 @@ async function main() {
       },
     });
   }
+
+  const cloudHostPlan = await prisma.paymentPlan.upsert({
+    where: { planNumber: 'PP-ENG-088' },
+    update: {
+      planType: PaymentPlanType.ADVANCE_REMAINING,
+      status: PaymentPlanStatus.WAITING_FOR_REMAINING_DOCS,
+      invoiceId: '20000000-0000-0000-0000-000000000002',
+      purchaseOrderId: cloudPo.id,
+      departmentId: engineering.id,
+      vendorId: cloudHost.id,
+      createdById: engineeringAdmin.id,
+      totalAmount: new Prisma.Decimal('425000'),
+      paidAmount: new Prisma.Decimal('212500'),
+      remainingAmount: new Prisma.Decimal('212500'),
+      advancePercent: new Prisma.Decimal('50'),
+      releaseCondition: 'Products/services received and GRN or delivery proof attached',
+      requiredFinalDocuments: ['GRN', 'DELIVERY_NOTE', 'RECEIPT'],
+      aiVerificationStatus: 'PENDING',
+      aiVerificationScore: 0,
+      aiVerificationNotes: null,
+    },
+    create: {
+      planNumber: 'PP-ENG-088',
+      planType: PaymentPlanType.ADVANCE_REMAINING,
+      status: PaymentPlanStatus.WAITING_FOR_REMAINING_DOCS,
+      invoiceId: '20000000-0000-0000-0000-000000000002',
+      purchaseOrderId: cloudPo.id,
+      departmentId: engineering.id,
+      vendorId: cloudHost.id,
+      createdById: engineeringAdmin.id,
+      totalAmount: new Prisma.Decimal('425000'),
+      paidAmount: new Prisma.Decimal('212500'),
+      remainingAmount: new Prisma.Decimal('212500'),
+      advancePercent: new Prisma.Decimal('50'),
+      releaseCondition: 'Products/services received and GRN or delivery proof attached',
+      requiredFinalDocuments: ['GRN', 'DELIVERY_NOTE', 'RECEIPT'],
+    },
+  });
+
+  await prisma.paymentMilestone.upsert({
+    where: {
+      paymentPlanId_sequence: {
+        paymentPlanId: cloudHostPlan.id,
+        sequence: 1,
+      },
+    },
+    update: {
+      label: 'Advance 50% payment',
+      kind: PaymentMilestoneKind.ADVANCE,
+      status: PaymentMilestoneStatus.PAID,
+      amount: new Prisma.Decimal('212500'),
+      percent: new Prisma.Decimal('50'),
+      requiredDocuments: ['INVOICE', 'PO'],
+      ticketId: '30000000-0000-0000-0000-000000000003',
+      paidAt: new Date('2026-05-15T10:00:00.000Z'),
+    },
+    create: {
+      paymentPlanId: cloudHostPlan.id,
+      sequence: 1,
+      label: 'Advance 50% payment',
+      kind: PaymentMilestoneKind.ADVANCE,
+      status: PaymentMilestoneStatus.PAID,
+      amount: new Prisma.Decimal('212500'),
+      percent: new Prisma.Decimal('50'),
+      requiredDocuments: ['INVOICE', 'PO'],
+      ticketId: '30000000-0000-0000-0000-000000000003',
+      paidAt: new Date('2026-05-15T10:00:00.000Z'),
+    },
+  });
+
+  await prisma.paymentMilestone.upsert({
+    where: {
+      paymentPlanId_sequence: {
+        paymentPlanId: cloudHostPlan.id,
+        sequence: 2,
+      },
+    },
+    update: {
+      label: 'Remaining 50% after receiving proof',
+      kind: PaymentMilestoneKind.REMAINING,
+      status: PaymentMilestoneStatus.BLOCKED,
+      amount: new Prisma.Decimal('212500'),
+      percent: new Prisma.Decimal('50'),
+      releaseCondition: 'Products/services received and GRN or delivery proof attached',
+      requiredDocuments: ['GRN', 'DELIVERY_NOTE', 'RECEIPT'],
+      ticketId: '30000000-0000-0000-0000-000000000004',
+    },
+    create: {
+      paymentPlanId: cloudHostPlan.id,
+      sequence: 2,
+      label: 'Remaining 50% after receiving proof',
+      kind: PaymentMilestoneKind.REMAINING,
+      status: PaymentMilestoneStatus.BLOCKED,
+      amount: new Prisma.Decimal('212500'),
+      percent: new Prisma.Decimal('50'),
+      releaseCondition: 'Products/services received and GRN or delivery proof attached',
+      requiredDocuments: ['GRN', 'DELIVERY_NOTE', 'RECEIPT'],
+      ticketId: '30000000-0000-0000-0000-000000000004',
+    },
+  });
 
   await prisma.supportingDocument.upsert({
     where: { id: 'sd-00000000-0000-0000-0000-000000000001' },

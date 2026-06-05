@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Company AP Automation - Figma Prototype</title>
+  <style>
+    :root {
+      --navy: #0b2545;
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #d7dee8;
+      --soft: #f6f8fb;
+      --teal: #14b8a6;
+      --blue: #2563eb;
+      --indigo: #4f46e5;
+      --green: #16a34a;
+      --amber: #d97706;
+      --red: #dc2626;
+      --white: #ffffff;
+      --shadow: 0 18px 50px rgba(15, 23, 42, 0.10);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef2f7;
+    }
+    .prototype-shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 292px 1fr;
+    }
+    .sidebar {
+      background: #0f1f36;
+      color: var(--white);
+      padding: 22px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+    }
+    .brand {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 22px;
+    }
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--teal), var(--blue));
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+    }
+    .brand h1 {
+      font-size: 17px;
+      margin: 0;
+      letter-spacing: 0;
+    }
+    .brand p {
+      margin: 3px 0 0;
+      color: #a9b6c9;
+      font-size: 12px;
+    }
+    .nav-group-title {
+      color: #91a1b9;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin: 22px 8px 8px;
+    }
+    .nav-btn {
+      width: 100%;
+      border: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 11px;
+      margin: 4px 0;
+      border-radius: 9px;
+      background: transparent;
+      color: #dbe7f5;
+      cursor: pointer;
+      text-align: left;
+      font-size: 13px;
+    }
+    .nav-btn:hover { background: rgba(255,255,255,.08); }
+    .nav-btn.active {
+      background: rgba(20, 184, 166, .18);
+      color: #ffffff;
+      outline: 1px solid rgba(20, 184, 166, .35);
+    }
+    .nav-index {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.12);
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+      flex: 0 0 auto;
+    }
+    .nav-btn.active .nav-index { background: var(--teal); color: #06201d; font-weight: 800; }
+    .nav-btn.locked {
+      display: none;
+    }
+    .role-card {
+      margin-top: 18px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .role-card label {
+      display: block;
+      color: #a9b6c9;
+      font-size: 12px;
+      margin-bottom: 7px;
+    }
+    .role-card select {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,.18);
+      background: #10243d;
+      color: #ffffff;
+      border-radius: 9px;
+      padding: 10px;
+    }
+    .session-card {
+      display: none;
+      margin-top: 18px;
+      background: rgba(20, 184, 166, .12);
+      border: 1px solid rgba(20, 184, 166, .32);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .session-card strong {
+      display: block;
+      color: #ffffff;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .session-card span {
+      display: block;
+      color: #a9f5eb;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    main {
+      padding: 24px;
+      min-width: 0;
+    }
+    .topbar {
+      min-height: 64px;
+      background: rgba(255,255,255,.86);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: var(--shadow);
+      margin-bottom: 18px;
+    }
+    .topbar h2 {
+      margin: 0;
+      font-size: 20px;
+      color: var(--navy);
+    }
+    .topbar p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
+    .auth-pill {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .logout-btn {
+      display: none;
+    }
+    .btn {
+      border: 1px solid var(--line);
+      background: var(--white);
+      color: var(--ink);
+      border-radius: 9px;
+      padding: 10px 13px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .btn.primary { background: var(--navy); border-color: var(--navy); color: var(--white); }
+    .btn.green { background: var(--green); border-color: var(--green); color: var(--white); }
+    .btn.red { background: var(--red); border-color: var(--red); color: var(--white); }
+    .btn.teal { background: var(--teal); border-color: var(--teal); color: #06201d; }
+    .screen { display: none; animation: fade .16s ease-out; }
+    .screen.active { display: block; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .layout-grid {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 18px;
+      align-items: start;
+    }
+    .layout-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+    .panel {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+      min-width: 0;
+    }
+    .panel h3 {
+      margin: 0 0 12px;
+      color: var(--navy);
+      font-size: 17px;
+    }
+    .panel p { color: var(--muted); line-height: 1.48; }
+    .muted { color: var(--muted); }
+    .hero-login {
+      min-height: 650px;
+      display: grid;
+      grid-template-columns: 1fr 440px;
+      gap: 22px;
+      align-items: stretch;
+    }
+    .intro {
+      border-radius: 22px;
+      background:
+        linear-gradient(135deg, rgba(11,37,69,.92), rgba(20,184,166,.74)),
+        radial-gradient(circle at 80% 20%, rgba(255,255,255,.2), transparent 30%);
+      color: white;
+      padding: 48px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+    .intro h2 {
+      font-size: 48px;
+      line-height: 1.02;
+      letter-spacing: 0;
+      max-width: 760px;
+      margin: 0;
+    }
+    .intro p { max-width: 660px; color: #dff7f3; font-size: 17px; }
+    .journey-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.14);
+      width: max-content;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .form-stack { display: grid; gap: 12px; }
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 4px;
+      background: #f1f5f9;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+    }
+    .tab-btn {
+      border: 0;
+      border-radius: 9px;
+      padding: 10px 12px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 800;
+    }
+    .tab-btn.active {
+      background: var(--white);
+      color: var(--navy);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, .08);
+    }
+    label { font-size: 12px; font-weight: 800; color: var(--navy); }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px 12px;
+      font: inherit;
+      background: var(--white);
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .stat {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 15px;
+      box-shadow: var(--shadow);
+    }
+    .stat strong { display: block; font-size: 24px; color: var(--navy); }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    .badge.ai { border-color: #99f6e4; background: #ecfdf5; color: #0f766e; }
+    .badge.risk { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+    .badge.human { border-color: #fed7aa; background: #fff7ed; color: #b45309; }
+    .badge.ok { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+    .icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: inline-grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 900;
+      color: white;
+      flex: 0 0 auto;
+    }
+    .icon.human { background: var(--amber); }
+    .icon.ai { background: var(--teal); color: #052b27; }
+    .icon.approval { background: var(--red); }
+    .icon.assist { background: var(--indigo); }
+    .upload-box {
+      border: 2px dashed #a7b3c4;
+      background: #f8fafc;
+      border-radius: 16px;
+      padding: 30px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 12px;
+    }
+    .field-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+    .field-card strong { display: block; color: var(--navy); margin-bottom: 4px; }
+    .confidence {
+      height: 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .confidence span { display:block; height:100%; background: var(--teal); }
+    .kanban {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(220px, 1fr));
+      gap: 12px;
+      overflow: auto;
+    }
+    .column {
+      min-height: 440px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .column h4 { margin: 0 0 10px; color: var(--navy); font-size: 13px; }
+    .ticket {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      padding: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      box-shadow: 0 10px 20px rgba(15,23,42,.06);
+    }
+    .ticket:hover { border-color: var(--teal); }
+    .ticket strong { display: block; color: var(--navy); margin-bottom: 7px; }
+    .ticket small { color: var(--muted); }
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+    .timeline-row div:last-child {
+      border-bottom: 1px solid #edf1f6;
+      padding-bottom: 10px;
+    }
+    .agent-card {
+      border: 1px solid #99f6e4;
+      background: #f0fdfa;
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .validation-score {
+      display: grid;
+      grid-template-columns: 108px 1fr;
+      gap: 14px;
+      align-items: center;
+      padding: 14px;
+      border-radius: 16px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+    }
+    .score-ring {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      background:
+        conic-gradient(var(--teal) 0 82%, #e2e8f0 82% 100%);
+      display: grid;
+      place-items: center;
+      color: var(--navy);
+      font-size: 22px;
+      font-weight: 900;
+      position: relative;
+    }
+    .score-ring::after {
+      content: "";
+      position: absolute;
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: var(--white);
+    }
+    .score-ring span {
+      position: relative;
+      z-index: 1;
+    }
+    .doc-checklist {
+      display: grid;
+      gap: 10px;
+    }
+    .doc-item {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+      border-radius: 12px;
+      padding: 10px;
+      font-size: 13px;
+    }
+    .doc-item strong { color: var(--navy); }
+    .doc-state {
+      font-size: 11px;
+      font-weight: 900;
+      border-radius: 999px;
+      padding: 5px 8px;
+      color: #0f766e;
+      background: #ccfbf1;
+      white-space: nowrap;
+    }
+    .doc-state.missing {
+      color: #b91c1c;
+      background: #fee2e2;
+    }
+    .doc-state.warn {
+      color: #b45309;
+      background: #ffedd5;
+    }
+    .approval-card {
+      border: 1px solid #fecaca;
+      background: #fff7f7;
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .doc-preview {
+      min-height: 360px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(#ffffff, #ffffff) padding-box,
+        repeating-linear-gradient(0deg, #eef2f7 0 18px, #f8fafc 18px 36px);
+      padding: 18px;
+    }
+    .doc-line { height: 12px; background: #dce4ef; border-radius: 99px; margin: 13px 0; }
+    .doc-line.short { width: 55%; }
+    .doc-line.mid { width: 78%; }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .chat {
+      display: grid;
+      gap: 10px;
+    }
+    .bubble {
+      max-width: 88%;
+      border-radius: 14px;
+      padding: 11px 12px;
+      line-height: 1.42;
+      font-size: 13px;
+    }
+    .bubble.user { background: #e0f2fe; justify-self: end; }
+    .bubble.ai { background: #ecfdf5; border: 1px solid #99f6e4; }
+    .figma-note {
+      margin-top: 18px;
+      border: 1px solid #c7d2fe;
+      background: #eef2ff;
+      color: #312e81;
+      border-radius: 14px;
+      padding: 13px 14px;
+      font-size: 13px;
+    }
+    .access-note {
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1e3a8a;
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+    .hidden {
+      display: none !important;
+    }
+    @media (max-width: 1180px) {
+      .prototype-shell { grid-template-columns: 1fr; }
+      .sidebar { position: relative; height: auto; }
+      .layout-grid, .layout-grid.three, .hero-login, .split, .stats { grid-template-columns: 1fr; }
+      .kanban { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">AP</div>
+        <div>
+          <h1>Company AP Automation</h1>
+          <p>Figma-ready clickable demo</p>
+        </div>
+      </div>
+      <div class="role-card">
+        <label for="loginUser">Demo account</label>
+        <select id="loginUser">
+          <option value="dept-user-eng">Engineering Department User</option>
+          <option value="dept-user-proc">Procurement Department User</option>
+          <option value="ap-clerk">AP Clerk - Finance</option>
+          <option value="cfo">CFO - Finance</option>
+          <option value="company-admin">Company Admin</option>
+        </select>
+      </div>
+      <div class="session-card" id="sessionCard">
+        <strong id="sessionName">Not logged in</strong>
+        <span id="sessionScope">Select an account and login to see role-based access.</span>
+      </div>
+      <div class="nav-group-title">End-to-end journey</div>
+      <button class="nav-btn active" data-go="login"><span class="nav-index">1</span> Login and role entry</button>
+      <button class="nav-btn" data-go="deptHome"><span class="nav-index">2</span> Department home</button>
+      <button class="nav-btn" data-go="intake"><span class="nav-index">3</span> Invoice intake</button>
+      <button class="nav-btn" data-go="invoice"><span class="nav-index">4</span> AI validation review</button>
+      <button class="nav-btn" data-go="apBoard"><span class="nav-index">5</span> AP Kanban board</button>
+      <button class="nav-btn" data-go="ticket"><span class="nav-index">6</span> AP ticket detail</button>
+      <button class="nav-btn" data-go="cfo"><span class="nav-index">7</span> CFO sign</button>
+      <button class="nav-btn" data-go="payment"><span class="nav-index">8</span> Payment and close</button>
+      <button class="nav-btn" data-go="monitor"><span class="nav-index">9</span> Agent monitor</button>
+      <button class="nav-btn" data-go="dashboard"><span class="nav-index">10</span> Reports dashboard</button>
+      <button class="nav-btn" data-go="assistant"><span class="nav-index">11</span> AP chat assistant</button>
+    </aside>
+
+    <main>
+      <div class="topbar">
+        <div>
+          <h2 id="frameTitle">Login and role entry</h2>
+          <p id="frameSubtitle">Start the role-scoped AP automation journey.</p>
+        </div>
+        <div class="actions">
+          <span class="auth-pill" id="authPill"><span class="icon human">H</span><span id="authText">Not logged in</span></span>
+          <button class="btn" id="prevBtn">Previous</button>
+          <button class="btn primary" id="nextBtn">Next in journey</button>
+          <button class="btn logout-btn" id="logoutBtn">Log out</button>
+        </div>
+      </div>
+
+      <section class="screen active" id="login" data-title="Login and role entry" data-subtitle="Role-based entry into the AP automation platform.">
+        <div class="hero-login">
+          <div class="intro">
+            <div>
+              <span class="journey-pill"><span class="icon ai">AI</span> Human + AI AP workflow</span>
+              <h2>One controlled AP journey from invoice intake to payment close.</h2>
+              <p>Department users, AI validation, AP Finance, CFO, Xero and the payment gateway all work from one ticket, with AI agents handling extraction, document checks, recommendations and monitoring.</p>
+            </div>
+            <div class="split">
+              <div><strong>Target cycle</strong><p>Clean invoices move from about 3 days toward 1 working day.</p></div>
+              <div><strong>Human gates</strong><p>AP exception review and CFO sign remain mandatory; department approval is checked as an attached document.</p></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="auth-tabs">
+              <button class="tab-btn active" id="signinTab">Sign in</button>
+              <button class="tab-btn" id="signupTab">Register department</button>
+            </div>
+            <div class="form-stack" id="signinPanel">
+              <h3>Demo login</h3>
+              <label>Email</label><input id="loginEmail" value="eng-user@demo.local" />
+              <label>Password</label><input id="loginPassword" value="changeme123" type="password" />
+              <label>Department</label><input id="loginDepartment" value="Engineering" readonly />
+              <label>Role</label><input id="loginRole" value="Department User" readonly />
+              <button class="btn primary" id="loginBtn">Login</button>
+            </div>
+            <div class="form-stack hidden" id="signupPanel">
+              <h3>New department registration</h3>
+              <label>Department name</label><input value="Procurement" />
+              <label>Department code</label><input value="PROC" />
+              <label>Requester email</label><input value="procurement@demo.local" />
+              <label>Approval document owner</label><input value="Department approver / procurement lead" />
+              <button class="btn teal" id="registerDeptBtn">Submit registration request</button>
+            </div>
+            <div class="figma-note">After login, navigation is filtered by role and department scope. Logout returns to this screen.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="deptHome" data-title="Department home" data-subtitle="Department user sees request status and creates a new invoice.">
+        <div class="stats">
+          <div class="stat"><strong>6</strong><span>Department requests</span></div>
+          <div class="stat"><strong>2</strong><span>Needs rework</span></div>
+          <div class="stat"><strong>4h</strong><span>Avg response time</span></div>
+          <div class="stat"><strong>91%</strong><span>AI extraction confidence</span></div>
+        </div>
+        <div class="access-note" id="departmentScopeNote">Showing only Engineering department invoice tickets for the logged-in user.</div>
+        <div class="panel">
+          <div class="actions" style="justify-content:space-between; margin-bottom:12px">
+            <div>
+              <h3 style="margin:0">Department invoice board</h3>
+              <p class="muted" style="margin:4px 0 0">Every invoice request appears here as a ticket from draft to paid.</p>
+            </div>
+            <button class="btn teal" data-go="intake">Create invoice</button>
+          </div>
+          <div class="kanban dept-board">
+            <div class="column">
+              <h4>Draft / Rework</h4>
+              <div class="ticket" data-go="invoice">
+                <strong>Repair maintenance slip - ENG-088</strong>
+                <span class="badge human"><span class="icon human">H</span> Department action</span>
+                <br><small>AI missing: GR and bank proof</small>
+              </div>
+              <div class="ticket" data-go="intake">
+                <strong>New invoice draft</strong>
+                <span class="badge ai"><span class="icon ai">AI</span> Extraction pending</span>
+                <br><small>Upload slip, PDF, email invoice or sheet import</small>
+              </div>
+            </div>
+            <div class="column">
+              <h4>AI Validation</h4>
+              <div class="ticket">
+                <strong>Laptop accessories</strong>
+                <span class="badge ai"><span class="icon ai">AI</span> 92% verified</span>
+                <br><small>Department approval, PO, invoice and GR attached</small>
+              </div>
+            </div>
+            <div class="column">
+              <h4>Finance / AP Processing</h4>
+              <div class="ticket">
+                <strong>Cloud hosting May invoice</strong>
+                <span class="badge human">AP review</span>
+                <br><small>Vendor / PO / account verification</small>
+              </div>
+            </div>
+            <div class="column">
+              <h4>Paid / Closed</h4>
+              <div class="ticket">
+                <strong>Printer maintenance</strong>
+                <span class="badge ok">Payment complete</span>
+                <br><small>Xero paid and requester notified</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="layout-grid" style="margin-top:18px">
+          <div class="panel">
+            <h3>What department can do</h3>
+            <div class="timeline">
+              <div class="timeline-row"><span class="icon human">H</span><div>Create invoice and synced PO request.</div></div>
+              <div class="timeline-row"><span class="icon human">H</span><div>Attach department approval, PO, invoice, slip, GR and supporting proof.</div></div>
+              <div class="timeline-row"><span class="icon human">H</span><div>Fix rejected or missing-document requests.</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Use AI extraction and validation before AP Finance receives the request.</div></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Recommended action</h3>
+            <div class="agent-card">
+              <span class="badge ai"><span class="icon ai">AI</span> Validation Agent</span>
+              <p>One request is 68% verified because GR and vendor bank proof are missing. Upload the missing documents before AP Finance can process it.</p>
+              <button class="btn teal" data-go="intake">Create new invoice</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="intake" data-title="Invoice intake" data-subtitle="Upload invoice and let the intake agent extract fields.">
+        <div class="layout-grid">
+          <div class="panel">
+            <h3>Create invoice request</h3>
+            <div class="form-stack">
+              <label>Invoice source / type</label>
+              <select id="invoiceSourceType">
+                <option value="slip">Repair / maintenance slip or image upload</option>
+                <option value="pdf">PDF or email invoice upload</option>
+                <option value="manual">Manual invoice entry</option>
+                <option value="sheet">Excel / Google Sheet import</option>
+              </select>
+            </div>
+
+            <div id="uploadIntakeFields" style="margin-top:14px">
+              <div class="upload-box">
+                <span class="badge ai"><span class="icon ai">AI</span> Intake OCR Agent</span>
+                <h3 id="uploadModeTitle">Drop image slip or scanned repair bill</h3>
+                <p id="uploadModeCopy">AI will classify the slip, extract vendor, amount, date, PO hint and account number, then show the extracted fields for review.</p>
+                <button class="btn primary" id="simulateExtractBtn" data-go="invoice">Upload and auto-populate</button>
+              </div>
+              <div class="field-grid" style="margin-top:14px">
+                <div class="field-card"><strong>Auto extracted vendor</strong>Metro Repairs Pvt Ltd<div class="confidence"><span style="width:94%"></span></div></div>
+                <div class="field-card"><strong>Auto extracted amount</strong>Rs 148,500<div class="confidence"><span style="width:97%"></span></div></div>
+                <div class="field-card"><strong>Auto extracted invoice/ref</strong>MR-2026-118<div class="confidence"><span style="width:76%"></span></div></div>
+                <div class="field-card"><strong>Auto detected bill type</strong>Cash Slip / Repair Maintenance<div class="confidence"><span style="width:91%"></span></div></div>
+              </div>
+              <div class="panel" style="box-shadow:none; margin-top:14px">
+                <h3>Mandatory document package</h3>
+                <div class="doc-checklist">
+                  <div class="doc-item"><span class="icon ai">AI</span><div><strong>Department approval document</strong><br><span class="muted">Signed approval or email approval PDF</span></div><span class="doc-state">attached</span></div>
+                  <div class="doc-item"><span class="icon ai">AI</span><div><strong>Purchase order</strong><br><span class="muted">PO must sync with invoice amount/vendor</span></div><span class="doc-state">matched</span></div>
+                  <div class="doc-item"><span class="icon ai">AI</span><div><strong>Invoice / slip</strong><br><span class="muted">Supplier invoice, repair slip or scanned bill</span></div><span class="doc-state">attached</span></div>
+                  <div class="doc-item"><span class="icon approval">!</span><div><strong>GR / receiving proof</strong><br><span class="muted">Goods received note or service completion proof</span></div><span class="doc-state missing">missing</span></div>
+                  <div class="doc-item"><span class="icon approval">!</span><div><strong>Vendor bank proof</strong><br><span class="muted">Account proof for payment validation</span></div><span class="doc-state warn">low confidence</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div id="manualIntakeFields" class="hidden" style="margin-top:14px">
+              <div class="field-grid">
+                <div><label>Vendor</label><input value="Metro Repairs Pvt Ltd" /></div>
+                <div><label>Amount PKR</label><input value="148500" /></div>
+                <div><label>Invoice / Reference number</label><input value="MR-2026-118" /></div>
+                <div><label>Invoice date</label><input value="2026-05-21" /></div>
+                <div><label>Expense nature</label><select><option>Repair Maintenance</option><option>Utilities</option><option>Software Cloud</option><option>Other</option></select></div>
+                <div><label>Payment method</label><select><option>Bank Portal</option><option>Cheque</option><option>Cash</option></select></div>
+                <div><label>PO number</label><input value="PO-ENG-4502" /></div>
+                <div><label>Vendor account number</label><input value="**** 7814" /></div>
+              </div>
+              <div class="figma-note">Manual mode shows full invoice and PO fields because no document extraction is available.</div>
+              <button class="btn primary" style="margin-top:12px" data-go="invoice">Create invoice and synced PO</button>
+            </div>
+
+            <div id="sheetIntakeFields" class="hidden" style="margin-top:14px">
+              <div class="access-note">Excel/Google Sheet import mode hides manual invoice fields. The system imports rows, maps columns, and creates invoice tickets in batch.</div>
+              <div class="field-grid">
+                <div><label>Source</label><select><option>Google Sheet</option><option>Excel upload</option></select></div>
+                <div><label>Worksheet / tab</label><input value="May AP Requests" /></div>
+                <div><label>Sheet URL or file</label><input value="https://docs.google.com/spreadsheets/..." /></div>
+                <div><label>Department column</label><input value="Department" /></div>
+                <div><label>Vendor column</label><input value="Vendor Name" /></div>
+                <div><label>Amount column</label><input value="Amount PKR" /></div>
+              </div>
+              <div class="agent-card" style="margin-top:12px">
+                <span class="badge ai"><span class="icon ai">AI</span> Sheet Import Agent</span>
+                <p>12 rows detected. 9 rows can be imported, 3 need mapping review. Manual invoice fields stay hidden in this mode.</p>
+              </div>
+              <button class="btn primary" style="margin-top:12px" data-go="deptHome">Import rows to department board</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>What happens after creation?</h3>
+            <div class="timeline">
+              <div class="timeline-row"><span class="icon human">H</span><div><strong>Department creates invoice</strong><br><span class="muted">User selects source/type and adds document or import source.</span></div></div>
+              <div class="timeline-row"><span class="icon human">H</span><div><strong>Required documents attached</strong><br><span class="muted">Department approval, PO, invoice/slip, GR and supporting proof are uploaded on the same invoice ticket.</span></div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div><strong>AI extracts or imports data</strong><br><span class="muted">Slip/PDF auto-populates fields; sheet mode maps rows.</span></div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div><strong>Invoice and PO sync</strong><br><span class="muted">System creates invoice, synced PO and department board ticket.</span></div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div><strong>AI validation gate</strong><br><span class="muted">Only complete, high-confidence requests move to AP Finance; incomplete requests return to department rework.</span></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="invoice" data-title="AI validation review" data-subtitle="Department reviews extracted invoice, synced PO and required documents before AP Finance.">
+        <div class="layout-grid">
+          <div class="panel">
+            <h3>Invoice, PO and document package</h3>
+            <div class="field-grid">
+              <div class="field-card"><strong>Vendor</strong>Metro Repairs Pvt Ltd<div class="confidence"><span style="width:94%"></span></div></div>
+              <div class="field-card"><strong>Amount</strong>Rs 148,500<div class="confidence"><span style="width:97%"></span></div></div>
+              <div class="field-card"><strong>Invoice number</strong>MR-2026-118<div class="confidence"><span style="width:76%"></span></div></div>
+              <div class="field-card"><strong>PO number</strong>PO-ENG-4502<div class="confidence"><span style="width:88%"></span></div></div>
+              <div class="field-card"><strong>Account number</strong>**** 7814<div class="confidence"><span style="width:63%"></span></div></div>
+              <div class="field-card"><strong>Expense nature</strong>Repair Maintenance<div class="confidence"><span style="width:91%"></span></div></div>
+            </div>
+            <div class="doc-checklist" style="margin-top:14px">
+              <div class="doc-item"><span class="icon ai">AI</span><div><strong>Department approval</strong><br><span class="muted">Attached approval document detected</span></div><span class="doc-state">verified</span></div>
+              <div class="doc-item"><span class="icon ai">AI</span><div><strong>PO</strong><br><span class="muted">PO vendor and amount match invoice</span></div><span class="doc-state">matched</span></div>
+              <div class="doc-item"><span class="icon ai">AI</span><div><strong>Invoice / slip</strong><br><span class="muted">Repair slip OCR completed</span></div><span class="doc-state">verified</span></div>
+              <div class="doc-item"><span class="icon approval">!</span><div><strong>GR / receiving proof</strong><br><span class="muted">Required before AP release</span></div><span class="doc-state missing">missing</span></div>
+              <div class="doc-item"><span class="icon approval">!</span><div><strong>Vendor bank proof</strong><br><span class="muted">Account number confidence is low</span></div><span class="doc-state warn">review</span></div>
+            </div>
+            <div class="actions" style="margin-top:14px; justify-content:flex-start">
+              <button class="btn">Save draft</button>
+              <button class="btn primary" data-go="deptHome">Submit for AI validation</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Agentic AI validation</h3>
+            <div class="validation-score">
+              <div class="score-ring"><span>82%</span></div>
+              <div>
+                <strong>82% verified</strong>
+                <p style="margin:6px 0 0">AI can extract and validate most fields, but this ticket cannot move cleanly to AP until missing GR is attached and bank proof is reviewed.</p>
+              </div>
+            </div>
+            <div class="agent-card">
+              <span class="badge ai"><span class="icon ai">AI</span> Validation Agent</span>
+              <p><strong>Incomplete package:</strong> GR is missing and invoice account confidence is 63%. AI recommends department rework before AP Finance takes ownership.</p>
+            </div>
+            <div class="timeline" style="margin-top:12px">
+              <div class="timeline-row"><span class="icon ai">AI</span><div>PO synced with invoice fields</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>No duplicate invoice found</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Department approval document detected</div></div>
+              <div class="timeline-row"><span class="icon approval">!</span><div>GR missing and account proof needs review</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="apBoard" data-title="AP Kanban board" data-subtitle="AP tracks workflow stages with AI readiness and risk badges.">
+        <div class="kanban">
+          <div class="column"><h4>AI validated docs</h4><div class="ticket" data-go="ticket"><strong>MR-2026-118</strong><span class="badge ai">92% verified</span><br><small>Required document package attached</small></div></div>
+          <div class="column"><h4>Vendor / PO / Account</h4><div class="ticket"><strong>ACC-2026-221</strong><span class="badge risk">Account mismatch</span></div></div>
+          <div class="column"><h4>WHT and voucher</h4><div class="ticket"><strong>LAW-2026-018</strong><span class="badge human">AP review</span></div></div>
+          <div class="column"><h4>CFO sign pending</h4><div class="ticket"><strong>CLD-2026-104</strong><span class="badge risk">High amount</span></div></div>
+        </div>
+      </section>
+
+      <section class="screen" id="ticket" data-title="AP ticket detail" data-subtitle="AP workspace combines ticket fields, AI copilot, comments, attachments and integration actions.">
+        <div class="layout-grid">
+          <div class="panel">
+            <h3>Ticket MR-2026-118</h3>
+            <div class="field-grid">
+              <div class="field-card"><strong>Status</strong>Vendor / PO / Account Verification</div>
+              <div class="field-card"><strong>Assigned to</strong>AP Clerk</div>
+              <div class="field-card"><strong>WHT filer status</strong>Filer recommended</div>
+              <div class="field-card"><strong>Net payable</strong>Rs 141,075 draft</div>
+            </div>
+            <div class="actions" style="margin-top:14px; justify-content:flex-start">
+              <button class="btn">Request docs</button>
+              <button class="btn teal">Accept WHT draft</button>
+              <button class="btn primary" data-go="cfo">Prepare payment</button>
+            </div>
+            <h3 style="margin-top:20px">Comments and activity</h3>
+            <div class="timeline">
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Validation completed: 1 low-confidence account field.</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Department approval document found in attachments and linked to invoice package.</div></div>
+              <div class="timeline-row"><span class="icon assist">S</span><div>WHT draft prepared for AP review.</div></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>AP Copilot</h3>
+            <div class="agent-card">
+              <span class="badge ai"><span class="icon assist">S</span> Semi-autonomous assist</span>
+              <p>Recommended next action: verify account proof, accept WHT filer calculation, then generate voucher. Confidence 88%.</p>
+              <button class="btn teal">Apply safe recommendations</button>
+            </div>
+            <h3 style="margin-top:18px">Integration readiness</h3>
+            <div class="timeline">
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Xero bill payload ready</div></div>
+              <div class="timeline-row"><span class="icon approval">!</span><div>CFO sign required before payment execution</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="cfo" data-title="CFO sign" data-subtitle="CFO sees payment risk summary and signs manually.">
+        <div class="layout-grid">
+          <div class="panel">
+            <h3>Payment approval summary</h3>
+            <div class="field-grid">
+              <div class="field-card"><strong>Vendor</strong>Metro Repairs Pvt Ltd</div>
+              <div class="field-card"><strong>Gross amount</strong>Rs 148,500</div>
+              <div class="field-card"><strong>WHT</strong>Rs 7,425</div>
+              <div class="field-card"><strong>Net payable</strong>Rs 141,075</div>
+            </div>
+            <div class="approval-card" style="margin-top:14px">
+              <span class="badge risk"><span class="icon approval">!</span> CFO human approval</span>
+              <p>AI and AP can prepare the payment, but CFO must sign before gateway execution.</p>
+              <button class="btn green" data-go="payment">Sign payment</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>AI risk summary</h3>
+            <div class="agent-card">
+              <p>Vendor and PO match. Account was low-confidence at intake but AP verified against vendor master. No duplicate payment detected.</p>
+              <span class="badge ok">Risk: Low after AP verification</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="payment" data-title="Payment and close" data-subtitle="Payment gateway/bank confirms execution; agents reconcile and recommend close.">
+        <div class="layout-grid">
+          <div class="panel">
+            <h3>Gateway execution</h3>
+            <div class="timeline">
+              <div class="timeline-row"><span class="icon approval">!</span><div>CFO signed at 04:12 PM</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Payment Gateway Agent submitted payment batch</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Bank confirmation matched amount, vendor and reference</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Xero payment marked and requester notified</div></div>
+            </div>
+            <button class="btn primary" data-go="dashboard">View close report</button>
+          </div>
+          <div class="panel">
+            <h3>Close controls</h3>
+            <div class="agent-card"><p>Agent recommends PAYMENT_COMPLETE. Ticket becomes read-only after close.</p><span class="badge ok">Ready to close</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="monitor" data-title="Agent monitor" data-subtitle="Company admin monitors jobs, retries safe failures and reviews audit trail.">
+        <div class="layout-grid three">
+          <div class="panel"><h3>Running jobs</h3><div class="ticket"><strong>Validation Agent</strong><span class="badge ai">23 jobs complete</span></div><div class="ticket"><strong>Xero Sync Agent</strong><span class="badge risk">1 retry needed</span></div></div>
+          <div class="panel"><h3>Failed run detail</h3><p>Xero token expired. Self-healing retry available after refresh token check.</p><button class="btn teal">Retry safe job</button></div>
+          <div class="panel"><h3>Governance</h3><p>All agent actions are logged with input references, confidence and prompt/model version.</p><span class="badge ok">Audit ready</span></div>
+        </div>
+      </section>
+
+      <section class="screen" id="dashboard" data-title="Reports dashboard" data-subtitle="Leadership sees AP cycle time, risks, savings and agent performance.">
+        <div class="stats">
+          <div class="stat"><strong>1.2d</strong><span>Clean invoice cycle</span></div>
+          <div class="stat"><strong>78%</strong><span>Manual entry reduced</span></div>
+          <div class="stat"><strong>11</strong><span>Missing-doc loops</span></div>
+          <div class="stat"><strong>0</strong><span>Unauthorized releases</span></div>
+        </div>
+        <div class="layout-grid">
+          <div class="panel"><h3>Operational trends</h3><div class="doc-line"></div><div class="doc-line mid"></div><div class="doc-line"></div><div class="doc-line short"></div></div>
+          <div class="panel"><h3>Top blockers</h3><div class="timeline"><div class="timeline-row"><span class="icon approval">!</span><div>Vendor account mismatch</div></div><div class="timeline-row"><span class="icon human">H</span><div>Missing GR or department approval attachments</div></div><div class="timeline-row"><span class="icon ai">AI</span><div>Low-confidence OCR fields</div></div></div></div>
+        </div>
+      </section>
+
+      <section class="screen" id="assistant" data-title="AP chat assistant" data-subtitle="Conversational assistant answers from ticket, invoice, PO, comments and activity data.">
+        <div class="layout-grid">
+          <div class="panel">
+            <h3>Ticket-aware chat</h3>
+            <div class="chat">
+              <div class="bubble user">What is blocking MR-2026-118?</div>
+              <div class="bubble ai">The ticket is ready for payment. Account proof was low confidence at intake, but AP verified it against vendor master. CFO sign is the only remaining human gate.</div>
+              <div class="bubble user">Can you summarize for CFO?</div>
+              <div class="bubble ai">Vendor Metro Repairs, net payable Rs 141,075, PO matched, WHT applied, no duplicate found, account verified by AP.</div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Allowed assistant scope</h3>
+            <div class="timeline">
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Summarize ticket and attachments</div></div>
+              <div class="timeline-row"><span class="icon ai">AI</span><div>Explain missing docs and next actions</div></div>
+              <div class="timeline-row"><span class="icon approval">!</span><div>Cannot approve, sign or release payment</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const order = ["login","deptHome","intake","invoice","apBoard","ticket","cfo","payment","monitor","dashboard","assistant"];
+    const users = {
+      "dept-user-eng": {
+        name: "Engineering Requester",
+        email: "eng-user@demo.local",
+        role: "DEPT_USER",
+        label: "Department User",
+        department: "Engineering",
+        home: "deptHome",
+        allowed: ["deptHome", "intake", "invoice", "assistant"]
+      },
+      "dept-user-proc": {
+        name: "Procurement Requester",
+        email: "procurement@demo.local",
+        role: "DEPT_USER",
+        label: "Department User",
+        department: "Procurement",
+        home: "deptHome",
+        allowed: ["deptHome", "intake", "invoice", "assistant"]
+      },
+      "ap-clerk": {
+        name: "AP Clerk",
+        email: "ap@demo.local",
+        role: "AP_CLERK",
+        label: "AP Clerk",
+        department: "Finance",
+        home: "apBoard",
+        allowed: ["apBoard", "ticket", "payment", "dashboard", "assistant"]
+      },
+      "cfo": {
+        name: "CFO",
+        email: "cfo@demo.local",
+        role: "CFO",
+        label: "CFO",
+        department: "Finance",
+        home: "cfo",
+        allowed: ["cfo", "payment", "dashboard", "assistant"]
+      },
+      "company-admin": {
+        name: "Company Admin",
+        email: "admin@demo.local",
+        role: "COMPANY_ADMIN",
+        label: "Company Admin",
+        department: "All departments",
+        home: "dashboard",
+        allowed: order.filter(id => id !== "login")
+      }
+    };
+    const roleDescriptions = {
+      DEPT_USER: "Can register/login by department, create invoices, upload required documents, edit own department drafts/rework and view own ticket context only.",
+      AP_CLERK: "Can access AP board, ticket detail, WHT/voucher, Xero/payment prep and AP reports. Cannot CFO-sign payments.",
+      CFO: "Can access CFO sign queue, payment summary, close reports and assistant. Cannot edit department/AP invoice details.",
+      COMPANY_ADMIN: "Can access all departments, all boards, agent monitor, reports and configuration views."
+    };
+    const departmentTickets = {
+      Engineering: {
+        active: "Repair maintenance slip - ENG-088",
+        ready: "Laptop accessories - ENG-221",
+        approved: "Cloud hosting May invoice",
+        aiReady: "MR-2026-118",
+        vendor: "Metro Repairs Pvt Ltd",
+        amount: "Rs 148,500",
+        po: "PO-ENG-4502",
+        expense: "Repair Maintenance"
+      },
+      Procurement: {
+        active: "Vendor onboarding fee - PROC-012",
+        ready: "Material supplier advance - PROC-077",
+        approved: "Office supplies May invoice",
+        aiReady: "PROC-2026-077",
+        vendor: "Prime Supplies Pvt Ltd",
+        amount: "Rs 286,000",
+        po: "PO-PROC-2026-44",
+        expense: "Procurement Services"
+      },
+      Finance: {
+        active: "Audit services invoice - FIN-104",
+        ready: "Tax advisory retainer - FIN-118",
+        approved: "Cloud hosting May invoice",
+        aiReady: "FIN-2026-104",
+        vendor: "CloudHost Services",
+        amount: "Rs 410,000",
+        po: "PO-FIN-2026-77",
+        expense: "Software Cloud"
+      },
+      "All departments": {
+        active: "Repair maintenance slip - ENG-088",
+        ready: "Audit services invoice - FIN-104",
+        approved: "Cloud hosting May invoice",
+        aiReady: "MR-2026-118",
+        vendor: "Metro Repairs Pvt Ltd",
+        amount: "Rs 148,500",
+        po: "PO-ENG-4502",
+        expense: "Repair Maintenance"
+      }
+    };
+
+    const buttons = [...document.querySelectorAll("[data-go]")];
+    const navButtons = [...document.querySelectorAll(".nav-btn")];
+    const screens = [...document.querySelectorAll(".screen")];
+    const title = document.getElementById("frameTitle");
+    const subtitle = document.getElementById("frameSubtitle");
+    const loginUser = document.getElementById("loginUser");
+    const loginEmail = document.getElementById("loginEmail");
+    const loginPassword = document.getElementById("loginPassword");
+    const loginDepartment = document.getElementById("loginDepartment");
+    const loginRole = document.getElementById("loginRole");
+    const loginBtn = document.getElementById("loginBtn");
+    const signinTab = document.getElementById("signinTab");
+    const signupTab = document.getElementById("signupTab");
+    const signinPanel = document.getElementById("signinPanel");
+    const signupPanel = document.getElementById("signupPanel");
+    const registerDeptBtn = document.getElementById("registerDeptBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const authPill = document.getElementById("authPill");
+    const authText = document.getElementById("authText");
+    const sessionCard = document.getElementById("sessionCard");
+    const sessionName = document.getElementById("sessionName");
+    const sessionScope = document.getElementById("sessionScope");
+    const invoiceSourceType = document.getElementById("invoiceSourceType");
+    const uploadIntakeFields = document.getElementById("uploadIntakeFields");
+    const manualIntakeFields = document.getElementById("manualIntakeFields");
+    const sheetIntakeFields = document.getElementById("sheetIntakeFields");
+    const uploadModeTitle = document.getElementById("uploadModeTitle");
+    const uploadModeCopy = document.getElementById("uploadModeCopy");
+    let current = "login";
+    let authUser = null;
+
+    function selectedUser() {
+      return users[loginUser.value];
+    }
+
+    function allowedScreens() {
+      return authUser ? authUser.allowed : ["login"];
+    }
+
+    function canAccess(id) {
+      if (id === "login") return true;
+      return Boolean(authUser && authUser.allowed.includes(id));
+    }
+
+    function homeForRole() {
+      return authUser?.home || "login";
+    }
+
+    function syncLoginFields() {
+      const user = selectedUser();
+      loginEmail.value = user.email;
+      loginDepartment.value = user.department;
+      loginRole.value = user.label;
+    }
+
+    function replaceText(selector, text) {
+      const node = document.querySelector(selector);
+      if (node) node.textContent = text;
+    }
+
+    function updateFieldCard(selector, label, value, confidence) {
+      const node = document.querySelector(selector);
+      if (!node) return;
+      const bar = confidence ? `<div class="confidence"><span style="width:${confidence}%"></span></div>` : "";
+      node.innerHTML = `<strong>${label}</strong>${value}${bar}`;
+    }
+
+    function updateTicketText(selector, index, text) {
+      const nodes = document.querySelectorAll(selector);
+      if (nodes[index]) nodes[index].textContent = text;
+    }
+
+    function updateScopedContent() {
+      const user = authUser || selectedUser();
+      const data = departmentTickets[user.department] || departmentTickets.Engineering;
+      replaceText("#departmentScopeNote", `Showing only ${user.department} department invoice tickets for the logged-in ${user.label}.`);
+      updateTicketText("#deptHome .dept-board .ticket strong", 0, data.active);
+      updateTicketText("#deptHome .dept-board .ticket strong", 2, data.ready);
+      updateTicketText("#deptHome .dept-board .ticket strong", 3, data.approved);
+      updateFieldCard("#invoice .field-card:nth-child(1)", "Vendor", data.vendor, 94);
+      updateFieldCard("#invoice .field-card:nth-child(2)", "Amount", data.amount, 97);
+      updateFieldCard("#invoice .field-card:nth-child(4)", "PO number", data.po, 88);
+      updateFieldCard("#invoice .field-card:nth-child(6)", "Expense nature", data.expense, 91);
+      replaceText("#apBoard .column:first-child .ticket strong", data.aiReady);
+      replaceText("#ticket .panel:first-child h3", `Ticket ${data.aiReady}`);
+      updateFieldCard("#cfo .field-card:nth-child(1)", "Vendor", data.vendor);
+      updateFieldCard("#cfo .field-card:nth-child(2)", "Gross amount", data.amount);
+    }
+
+    function toggleInvoiceSource() {
+      const value = invoiceSourceType.value;
+      const isManual = value === "manual";
+      const isSheet = value === "sheet";
+      const isPdf = value === "pdf";
+      uploadIntakeFields.classList.toggle("hidden", isManual || isSheet);
+      manualIntakeFields.classList.toggle("hidden", !isManual);
+      sheetIntakeFields.classList.toggle("hidden", !isSheet);
+      if (isPdf) {
+        uploadModeTitle.textContent = "Drop PDF or email invoice attachment";
+        uploadModeCopy.textContent = "AI will read the invoice document, extract invoice fields, suggest vendor/PO matches, and validate the required document package before AP Finance.";
+      } else if (!isManual && !isSheet) {
+        uploadModeTitle.textContent = "Drop image slip or scanned repair bill";
+        uploadModeCopy.textContent = "AI will classify the slip, extract vendor, amount, date, PO hint and account number, then check required attachments and show verification percentage.";
+      }
+    }
+
+    function setAuthTab(mode) {
+      const signup = mode === "signup";
+      signinTab.classList.toggle("active", !signup);
+      signupTab.classList.toggle("active", signup);
+      signinPanel.classList.toggle("hidden", signup);
+      signupPanel.classList.toggle("hidden", !signup);
+    }
+
+    function applyAuthState() {
+      const allowed = allowedScreens();
+      navButtons.forEach((btn) => {
+        const id = btn.dataset.go;
+        const visible = id === "login" ? !authUser : allowed.includes(id);
+        btn.classList.toggle("locked", !visible);
+      });
+      const loggedIn = Boolean(authUser);
+      authPill.style.display = loggedIn ? "inline-flex" : "none";
+      logoutBtn.style.display = loggedIn ? "inline-flex" : "none";
+      sessionCard.style.display = loggedIn ? "block" : "none";
+      document.querySelector(".role-card").style.display = loggedIn ? "none" : "block";
+      document.getElementById("prevBtn").style.display = loggedIn ? "inline-flex" : "none";
+      document.getElementById("nextBtn").style.display = loggedIn ? "inline-flex" : "none";
+      if (loggedIn) {
+        authText.textContent = `${authUser.name} / ${authUser.label} / ${authUser.department}`;
+        sessionName.textContent = authUser.name;
+        sessionScope.textContent = `${authUser.label} - ${authUser.department}. ${roleDescriptions[authUser.role]}`;
+      }
+      updateScopedContent();
+    }
+
+    function showScreen(id, message) {
+      current = id;
+      screens.forEach(screen => screen.classList.toggle("active", screen.id === id));
+      navButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.go === id));
+      const screen = document.getElementById(id);
+      title.textContent = screen.dataset.title;
+      subtitle.textContent = message || screen.dataset.subtitle;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function go(id) {
+      if (!authUser && id !== "login") {
+        showScreen("login", "Please login first. Prototype screens are role protected.");
+        return;
+      }
+      if (!canAccess(id)) {
+        showScreen(homeForRole(), `Access blocked for ${authUser.label}. Showing your allowed ${authUser.department} workspace.`);
+        return;
+      }
+      showScreen(id);
+    }
+
+    function login() {
+      const user = selectedUser();
+      if (loginPassword.value !== "changeme123") {
+        showScreen("login", "Invalid demo password. Use changeme123.");
+        return;
+      }
+      authUser = user;
+      applyAuthState();
+      showScreen(user.home, `Logged in as ${user.label}. Showing ${user.department} scoped workspace.`);
+    }
+
+    function logout() {
+      authUser = null;
+      applyAuthState();
+      showScreen("login", "Logged out. Select a demo account to view role-based access.");
+    }
+
+    function nextAllowed(delta) {
+      const allowed = allowedScreens();
+      const visibleOrder = order.filter(id => allowed.includes(id));
+      const index = visibleOrder.indexOf(current);
+      if (index === -1) return visibleOrder[0] || "login";
+      return visibleOrder[Math.max(0, Math.min(index + delta, visibleOrder.length - 1))];
+    }
+
+    loginUser.addEventListener("change", syncLoginFields);
+    invoiceSourceType.addEventListener("change", toggleInvoiceSource);
+    signinTab.addEventListener("click", () => setAuthTab("signin"));
+    signupTab.addEventListener("click", () => setAuthTab("signup"));
+    registerDeptBtn.addEventListener("click", () => {
+      loginUser.value = "dept-user-proc";
+      syncLoginFields();
+      setAuthTab("signin");
+      showScreen("login", "Procurement department registration captured in the prototype. Sign in as Procurement Department User to preview access.");
+    });
+    loginBtn.addEventListener("click", login);
+    logoutBtn.addEventListener("click", logout);
+    buttons.forEach(btn => btn.addEventListener("click", () => go(btn.dataset.go)));
+    document.getElementById("nextBtn").addEventListener("click", () => go(nextAllowed(1)));
+    document.getElementById("prevBtn").addEventListener("click", () => go(nextAllowed(-1)));
+
+    syncLoginFields();
+    toggleInvoiceSource();
+    applyAuthState();
+    showScreen("login");
+  </script>
+</body>
+</html>

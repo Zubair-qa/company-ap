@@ -6,7 +6,23 @@ import { api } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 
 type Department = { id: string; name: string };
-type Vendor = { id: string; displayName: string; kind: string };
+type Vendor = {
+  id: string;
+  displayName: string;
+  kind: string;
+  vendorCode?: string | null;
+  legalName?: string | null;
+  taxNumber?: string | null;
+  ntn?: string | null;
+  strn?: string | null;
+  bankName?: string | null;
+  bankAccountTitle?: string | null;
+  bankAccountNumber?: string | null;
+  iban?: string | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
 type Assignee = { id: string; name: string; email: string; role: string };
 
 type TicketDetail = {
@@ -64,6 +80,40 @@ type TicketDetail = {
   parentTicketId: string | null;
   notes: string | null;
   childTickets: Array<{ id: string; title: string; amountPkr: string; status: string }>;
+  paymentMilestone: {
+    id: string;
+    label: string;
+    kind: string;
+    status: string;
+    amount: string;
+    percent: string | null;
+    releaseCondition: string | null;
+    requiredDocuments: string[];
+    paymentPlan: {
+      id: string;
+      planNumber: string;
+      planType: string;
+      status: string;
+      totalAmount: string;
+      paidAmount: string;
+      remainingAmount: string;
+      advancePercent: string | null;
+      releaseCondition: string | null;
+      requiredFinalDocuments: string[];
+      aiVerificationStatus: string;
+      aiVerificationScore: number;
+      aiVerificationNotes: string | null;
+      milestones: Array<{
+        id: string;
+        sequence: number;
+        label: string;
+        kind: string;
+        status: string;
+        amount: string;
+        ticket: { id: string; title: string; status: string; amountPkr: string } | null;
+      }>;
+    };
+  } | null;
   invoice: {
     id: string;
     reference: string | null;
@@ -85,7 +135,7 @@ type TicketDetail = {
 
 type TicketAttachment = {
   id: string;
-  ticketId: string;
+  ticketId: string | null;
   fileName: string;
   mimeType: string;
   fileSize: string;
@@ -150,6 +200,17 @@ type Draft = {
 type Notice = {
   type: 'success' | 'error';
   message: string;
+};
+
+type WorkflowAgentResult = {
+  decision: {
+    summary: string;
+    confidence: number;
+    missingDocuments: string[];
+    humanRequired: string | null;
+    toStatus: string;
+  };
+  ticket: TicketDetail;
 };
 
 const priorityOptions = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
@@ -233,12 +294,11 @@ const allTicketUpdateFields = [
 ];
 
 const apStageFields: Record<string, string[]> = {
-  DOCS_REVIEW: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
-  MISSING_DOCS: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
-  REQUESTER_PINGED: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
-  WAITING_FOR_DOCS: ['status', 'assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  DOCS_REVIEW: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  MISSING_DOCS: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  REQUESTER_PINGED: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
+  WAITING_FOR_DOCS: ['assignedToId', 'documentStatus', 'missingDocuments', 'notes'],
   VENDOR_PO_ACCOUNT_VERIFICATION: [
-    'status',
     'assignedToId',
     'vendorId',
     'vendorNameSnapshot',
@@ -257,10 +317,9 @@ const apStageFields: Record<string, string[]> = {
     'accountVerificationSource',
     'notes',
   ],
-  WHT_CALCULATION: ['status', 'assignedToId', 'whtFilerStatus', 'whtRate', 'notes'],
-  VOUCHER_GENERATION: ['status', 'assignedToId', 'voucherNumber', 'notes'],
+  WHT_CALCULATION: ['assignedToId', 'whtFilerStatus', 'whtRate', 'notes'],
+  VOUCHER_GENERATION: ['assignedToId', 'voucherNumber', 'notes'],
   XERO_BILL_ENTRY: [
-    'status',
     'assignedToId',
     'xeroSyncStatus',
     'xeroContactId',
@@ -270,7 +329,6 @@ const apStageFields: Record<string, string[]> = {
     'notes',
   ],
   PAYMENT_PREPARATION: [
-    'status',
     'assignedToId',
     'paymentMethod',
     'bankPaymentStatus',
@@ -280,6 +338,9 @@ const apStageFields: Record<string, string[]> = {
   BANK_UPLOAD: [
     'status',
     'assignedToId',
+    'whtFilerStatus',
+    'whtRate',
+    'voucherNumber',
     'bankPaymentStatus',
     'bankPortalReference',
     'notes',
@@ -293,7 +354,6 @@ const apStageFields: Record<string, string[]> = {
 
 const departmentStageFields: Record<string, string[]> = {
   NEW_REQUEST: [
-    'status',
     'title',
     'priority',
     'requesterName',
@@ -305,21 +365,84 @@ const departmentStageFields: Record<string, string[]> = {
     'internalReference',
     'amountPkr',
     'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
     'expenseNature',
     'billType',
     'notes',
   ],
-  WAITING_FOR_DOCS: [
-    'status',
+  MISSING_DOCS: [
     'title',
     'requesterName',
     'requesterEmail',
+    'vendorId',
     'vendorNameSnapshot',
     'purchaseOrderNumber',
     'invoiceNumber',
     'internalReference',
     'amountPkr',
     'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'expenseNature',
+    'billType',
+    'notes',
+  ],
+  REQUESTER_PINGED: [
+    'title',
+    'requesterName',
+    'requesterEmail',
+    'vendorId',
+    'vendorNameSnapshot',
+    'purchaseOrderNumber',
+    'invoiceNumber',
+    'internalReference',
+    'amountPkr',
+    'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'expenseNature',
+    'billType',
+    'notes',
+  ],
+  ADVANCE_PAID_REMAINING_PENDING: [
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
+    'notes',
+  ],
+  WAITING_FOR_DOCS: [
+    'title',
+    'requesterName',
+    'requesterEmail',
+    'vendorId',
+    'vendorNameSnapshot',
+    'purchaseOrderNumber',
+    'invoiceNumber',
+    'internalReference',
+    'amountPkr',
+    'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
     'expenseNature',
     'billType',
     'notes',
@@ -338,6 +461,25 @@ const pkr = new Intl.NumberFormat('en-PK', {
 
 function human(value: string) {
   return value.replaceAll('_', ' ').toLowerCase();
+}
+
+function badgeTone(value: string | null | undefined) {
+  const normalized = (value ?? '').toUpperCase();
+  if (normalized === 'UNKNOWN' || normalized === 'NOT_READY') return 'badge badge-rose';
+  if (normalized === 'FAILED' || normalized === 'MISMATCH' || normalized === 'INCOMPLETE') {
+    return 'badge badge-rose';
+  }
+  if (normalized === 'COMPLETE' || normalized === 'EXECUTED' || normalized === 'PAID_MARKED') {
+    return 'badge badge-emerald';
+  }
+  if (normalized === 'READY_TO_SYNC' || normalized === 'READY_FOR_UPLOAD') {
+    return 'badge badge-amber';
+  }
+  return 'badge';
+}
+
+function displayPersonName(name: string | undefined | null) {
+  return name === 'AP Clerk' ? 'AP Finance' : name ?? 'System';
 }
 
 function labelForStatus(status: string, meta?: Meta) {
@@ -425,6 +567,45 @@ function apiErrorMessage(error: unknown) {
   return message ?? maybe.response?.data?.error ?? maybe.message ?? 'Request failed.';
 }
 
+function attachmentExtension(attachment: TicketAttachment) {
+  return attachment.fileName.toLowerCase().split('.').pop() ?? '';
+}
+
+function isImageAttachment(attachment: TicketAttachment) {
+  return (
+    attachment.mimeType.startsWith('image/') ||
+    ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(attachmentExtension(attachment))
+  );
+}
+
+function isPdfAttachment(attachment: TicketAttachment) {
+  return attachment.mimeType === 'application/pdf' || attachmentExtension(attachment) === 'pdf';
+}
+
+function isPlainTextAttachment(attachment: TicketAttachment) {
+  return attachment.mimeType === 'text/plain' || attachmentExtension(attachment) === 'txt';
+}
+
+function isPreviewableAttachment(attachment: TicketAttachment) {
+  return isImageAttachment(attachment) || isPdfAttachment(attachment) || isPlainTextAttachment(attachment);
+}
+
+const departmentAgentStatuses = [
+  'NEW_REQUEST',
+  'MISSING_DOCS',
+  'REQUESTER_PINGED',
+  'WAITING_FOR_DOCS',
+  'ADVANCE_PAID_REMAINING_PENDING',
+];
+const agentOwnedStatuses = [
+  'DOCS_REVIEW',
+  'VENDOR_PO_ACCOUNT_VERIFICATION',
+  'WHT_CALCULATION',
+  'VOUCHER_GENERATION',
+  'XERO_BILL_ENTRY',
+  'PAYMENT_PREPARATION',
+];
+
 function editableFieldsFor(role: string | undefined, status: string) {
   if (status === 'PAYMENT_COMPLETE') return new Set<string>();
   if (role === 'COMPANY_ADMIN') return new Set(allTicketUpdateFields);
@@ -435,7 +616,16 @@ function editableFieldsFor(role: string | undefined, status: string) {
   return new Set<string>();
 }
 
-function saveMessage(payload: Record<string, unknown>) {
+function saveMessage(payload: Record<string, unknown>, updated?: TicketDetail) {
+  if (updated?.status === 'BANK_UPLOAD' && payload.status === undefined) {
+    return 'AI validation passed and released the ticket to AP Finance final review.';
+  }
+  if (updated?.status === 'WAITING_FOR_DOCS' && payload.status === undefined) {
+    return 'AI validation saved the ticket in draft/rework with missing requirements.';
+  }
+  if (updated?.status === 'PAYMENT_COMPLETE' && payload.status === 'BANK_EXECUTION_PENDING') {
+    return 'CFO signed successfully. Payment gateway executed, Xero marked paid, requester notified, and ticket closed.';
+  }
   if (payload.status === 'BANK_EXECUTION_PENDING') return 'CFO sign recorded successfully.';
   if (payload.status === 'BANK_EXECUTED') return 'Bank execution recorded successfully.';
   if (payload.status === 'REQUESTER_NOTIFIED') return 'Requester notification recorded successfully.';
@@ -452,8 +642,11 @@ export function TicketDetailPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
   const [comment, setComment] = useState('');
+  const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState('');
+  const [cfoRejectReason, setCfoRejectReason] = useState('');
   const scopeKey = user?.id ?? 'anonymous';
 
   const { data: ticket, isLoading, error } = useQuery({
@@ -486,6 +679,64 @@ export function TicketDetailPage() {
     if (ticket) setDraft(makeDraft(ticket));
   }, [ticket]);
 
+  const previewableAttachments = useMemo(
+    () => attachments.filter(isPreviewableAttachment),
+    [attachments],
+  );
+  const selectedPreviewAttachment = useMemo(() => {
+    if (!previewableAttachments.length) return null;
+    return (
+      previewableAttachments.find((attachment) => attachment.id === selectedPreviewId) ??
+      previewableAttachments.find((attachment) => attachment.documentType === 'INVOICE') ??
+      previewableAttachments[0]
+    );
+  }, [previewableAttachments, selectedPreviewId]);
+
+  useEffect(() => {
+    if (!previewableAttachments.length) {
+      setSelectedPreviewId(null);
+      return;
+    }
+    if (
+      !selectedPreviewId ||
+      !previewableAttachments.some((attachment) => attachment.id === selectedPreviewId)
+    ) {
+      const invoiceAttachment =
+        previewableAttachments.find((attachment) => attachment.documentType === 'INVOICE') ??
+        previewableAttachments[0];
+      setSelectedPreviewId(invoiceAttachment.id);
+    }
+  }, [previewableAttachments, selectedPreviewId]);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setPreviewUrl(null);
+    setPreviewError('');
+
+    if (!id || !selectedPreviewAttachment) return undefined;
+
+    api
+      .get<Blob>(
+        `/api/tickets/${id}/attachments/${selectedPreviewAttachment.id}/preview`,
+        { responseType: 'blob' },
+      )
+      .then(({ data }) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(data);
+        setPreviewUrl(objectUrl);
+      })
+      .catch((previewLoadError) => {
+        if (!active) return;
+        setPreviewError(apiErrorMessage(previewLoadError));
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id, selectedPreviewAttachment]);
+
   const update = useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
       const { data } = await api.patch<TicketDetail>(`/api/tickets/${id}`, payload);
@@ -495,7 +746,24 @@ export function TicketDetailPage() {
       qc.invalidateQueries({ queryKey: ['tickets'] });
       qc.setQueryData(['ticket', id, scopeKey], updated);
       setDraft(makeDraft(updated));
-      setNotice({ type: 'success', message: saveMessage(payload) });
+      setNotice({ type: 'success', message: saveMessage(payload, updated) });
+    },
+    onError: (mutationError) => {
+      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
+    },
+  });
+
+  const submitToFinance = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<WorkflowAgentResult>(`/api/tickets/${id}/submit-finance`, {});
+      return data;
+    },
+    onSuccess: ({ decision, ticket: updated }) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.setQueryData(['ticket', id, scopeKey], updated);
+      setDraft(makeDraft(updated));
+      setNotice({ type: 'success', message: decision.summary });
     },
     onError: (mutationError) => {
       setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
@@ -540,6 +808,52 @@ export function TicketDetailPage() {
     },
   });
 
+  const runTestBankAutomation = useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<{ ticket: TicketDetail }>(
+        `/api/tickets/${id}/test-bank-auto-close`,
+        {},
+      );
+      return data.ticket;
+    },
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.setQueryData(['ticket', id, scopeKey], updated);
+      setDraft(makeDraft(updated));
+      setNotice({
+        type: 'success',
+        message: 'Test bank executed, Xero paid, requester notified, and ticket closed.',
+      });
+    },
+    onError: (mutationError) => {
+      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
+    },
+  });
+
+  const cfoReject = useMutation({
+    mutationFn: async (reason: string) => {
+      const { data } = await api.post<TicketDetail>(`/api/tickets/${id}/cfo-reject`, {
+        reason,
+      });
+      return data;
+    },
+    onSuccess: (updated) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.setQueryData(['ticket', id, scopeKey], updated);
+      setDraft(makeDraft(updated));
+      setCfoRejectReason('');
+      setNotice({
+        type: 'success',
+        message: 'CFO rejection sent to department rework successfully.',
+      });
+    },
+    onError: (mutationError) => {
+      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
+    },
+  });
+
   const uploadAttachment = useMutation({
     mutationFn: async (file: File) => {
       const fd = new FormData();
@@ -548,6 +862,9 @@ export function TicketDetailPage() {
       return data;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ap-ops'] });
+      qc.invalidateQueries({ queryKey: ['ticket', id, scopeKey] });
       qc.invalidateQueries({ queryKey: ['ticket', id, 'attachments', scopeKey] });
       setAttachmentFile(null);
       setNotice({ type: 'success', message: 'Attachment uploaded successfully.' });
@@ -574,31 +891,6 @@ export function TicketDetailPage() {
     },
   });
 
-  const decideApproval = useMutation({
-    mutationFn: async (approved: boolean) => {
-      if (!ticket.invoice?.id) throw new Error('Invoice link is missing.');
-      const { data } = await api.post(`/api/approvals/${ticket.invoice.id}`, {
-        approved,
-        note: rejectReason || undefined,
-      });
-      return data;
-    },
-    onSuccess: (_data, approved) => {
-      qc.invalidateQueries({ queryKey: ['tickets'] });
-      qc.invalidateQueries({ queryKey: ['ticket', id, scopeKey] });
-      setNotice({
-        type: 'success',
-        message: approved
-          ? 'Request approved and released to finance.'
-          : 'Request rejected and returned to department.',
-      });
-      setRejectReason('');
-    },
-    onError: (mutationError) => {
-      setNotice({ type: 'error', message: apiErrorMessage(mutationError) });
-    },
-  });
-
   const totals = useMemo(() => {
     if (!ticket) return null;
     return [
@@ -619,6 +911,7 @@ export function TicketDetailPage() {
   const isCompanyAdmin = user?.role === 'COMPANY_ADMIN';
   const isAp = user?.role === 'AP_CLERK';
   const isCfo = user?.role === 'CFO';
+  const isDepartmentRole = user?.role === 'DEPT_USER' || user?.role === 'DEPT_ADMIN';
   const isClosed = ticket.status === 'PAYMENT_COMPLETE';
   const editableFields = editableFieldsFor(user?.role, ticket.status);
   const canEdit = (fieldName: string) => editableFields.has(fieldName);
@@ -634,43 +927,53 @@ export function TicketDetailPage() {
     'internalReference',
     'amountPkr',
     'paymentMethod',
+    'vendorAccountNumber',
+    'invoiceAccountNumber',
+    'accountVerificationSource',
+    'legacySheetRowId',
+    'legacySheetName',
+    'oldReference',
     'expenseNature',
     'billType',
   ].some(canEdit);
-  const canEditFinance = [
-    'documentStatus',
-    'missingDocuments',
-    'purchaseOrderVerified',
-    'vendorAccountNumber',
-    'invoiceAccountNumber',
-    'whtFilerStatus',
-    'voucherNumber',
-    'xeroSyncStatus',
-    'bankPaymentStatus',
-    'trelloCardId',
-  ].some(canEdit);
   const canEditCfoSign = Boolean(
     !isClosed &&
-      (isCompanyAdmin ||
-        (isCfo && ticket.status === 'CFO_SIGN_PENDING' && canEdit('bankPaymentStatus'))),
+      isCfo &&
+      ticket.status === 'CFO_SIGN_PENDING' &&
+      canEdit('bankPaymentStatus'),
   );
   const canUseXeroActions = Boolean(!isClosed && (isCompanyAdmin || isAp));
   const canCreateXeroBill = Boolean(canUseXeroActions && ticket.status === 'XERO_BILL_ENTRY');
   const canMarkPaidInXero = Boolean(canUseXeroActions && ticket.status === 'BANK_EXECUTED');
-  const canSaveTicket = Boolean(!isClosed && editableFields.size > 0);
+  const canSaveTicket = Boolean(!isClosed && !isCfo && editableFields.size > 0);
   const canUploadAttachment = Boolean(
     !isClosed &&
       (isCompanyAdmin ||
         isAp ||
         (user?.role === 'DEPT_USER' &&
-          ['NEW_REQUEST', 'WAITING_FOR_DOCS'].includes(ticket.status)) ||
+          [
+            'NEW_REQUEST',
+            'MISSING_DOCS',
+            'REQUESTER_PINGED',
+            'ADVANCE_PAID_REMAINING_PENDING',
+            'WAITING_FOR_DOCS',
+          ].includes(ticket.status)) ||
         (isCfo && ticket.status === 'CFO_SIGN_PENDING')),
   );
-  const canHeadApprove = Boolean(
-    user?.role === 'DEPT_ADMIN' &&
-      ticket.status === 'DEPARTMENT_HEAD_APPROVAL' &&
-      ticket.invoice?.id,
+  const canSubmitRemainingProof = Boolean(
+    user?.role === 'DEPT_USER' &&
+      ticket.status === 'ADVANCE_PAID_REMAINING_PENDING',
   );
+  const canApFinalReview = Boolean(!isClosed && (isAp || isCompanyAdmin) && ticket.status === 'BANK_UPLOAD');
+  const isDepartmentAgentStage = departmentAgentStatuses.includes(ticket.status);
+  const isAgentOwnedStage = agentOwnedStatuses.includes(ticket.status);
+  const agentScopeMessage = isDepartmentAgentStage
+    ? 'Save request details or upload proof. The validation agent checks completeness automatically and releases the ticket only when documents, vendor, PO, account evidence, and amount are ready.'
+    : isAgentOwnedStage
+      ? 'This stage is controlled by the validation agent. Manual status movement is disabled while document, account, voucher, Xero, and payment readiness checks complete.'
+      : canApFinalReview
+        ? 'AI document and data checks are complete. AP Finance sets tax/WHT, voucher, and payment readiness, then requests proof or sends the payment to CFO sign.'
+        : null;
 
   function fullPayload() {
     return {
@@ -732,6 +1035,11 @@ export function TicketDetailPage() {
     update.mutate(scopedPayload({ status, ...extra }));
   }
 
+  function submitRemainingProof() {
+    setNotice(null);
+    submitToFinance.mutate();
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     setNotice(null);
@@ -746,6 +1054,21 @@ export function TicketDetailPage() {
   function markPaid() {
     setNotice(null);
     markPaidInXero.mutate();
+  }
+
+  function runTestBank() {
+    setNotice(null);
+    runTestBankAutomation.mutate();
+  }
+
+  function rejectByCfo() {
+    const reason = cfoRejectReason.trim();
+    if (!reason) {
+      setNotice({ type: 'error', message: 'CFO rejection reason is required.' });
+      return;
+    }
+    setNotice(null);
+    cfoReject.mutate(reason);
   }
 
   function attachFile(event: FormEvent) {
@@ -798,7 +1121,6 @@ export function TicketDetailPage() {
     !isClosed && canEdit('status') && (ticket.availableTransitions ?? []).length > 0,
   );
   const canAssign = Boolean(!isClosed && ticket.canAssign && meta?.canAssign && canEdit('assignedToId'));
-
   return (
     <div className="ticket-detail-page">
       <p>
@@ -835,54 +1157,156 @@ export function TicketDetailPage() {
         </div>
       ) : null}
 
-      {canHeadApprove ? (
+      {isDepartmentRole && !isClosed && !canSaveTicket ? (
+        <div className="notice notice-info" role="status">
+          Tracking view only. Department can follow this ticket here; edits reopen only when it
+          returns to department draft/rework.
+        </div>
+      ) : null}
+
+      {ticket.paymentMilestone ? (
+        <section className="ticket-panel ticket-wide-panel">
+          <div className="payment-plan-header">
+            <div>
+              <h3>Payment plan</h3>
+              <p className="muted">
+                {ticket.paymentMilestone.paymentPlan.planNumber} /{' '}
+                {human(ticket.paymentMilestone.paymentPlan.planType)} /{' '}
+                {human(ticket.paymentMilestone.paymentPlan.status)}
+              </p>
+            </div>
+            <span className={badgeTone(ticket.paymentMilestone.paymentPlan.aiVerificationStatus)}>
+              AI {human(ticket.paymentMilestone.paymentPlan.aiVerificationStatus)}{' '}
+              {ticket.paymentMilestone.paymentPlan.aiVerificationScore}%
+            </span>
+          </div>
+          <div className="payment-plan-totals">
+            <span>
+              <small>Total</small>
+              <strong>{money(ticket.paymentMilestone.paymentPlan.totalAmount)}</strong>
+            </span>
+            <span>
+              <small>Paid</small>
+              <strong>{money(ticket.paymentMilestone.paymentPlan.paidAmount)}</strong>
+            </span>
+            <span>
+              <small>Remaining</small>
+              <strong>{money(ticket.paymentMilestone.paymentPlan.remainingAmount)}</strong>
+            </span>
+          </div>
+          <div className="payment-milestone-list">
+            {ticket.paymentMilestone.paymentPlan.milestones.map((milestone) => (
+              <div
+                key={milestone.id}
+                className={
+                  milestone.id === ticket.paymentMilestone?.id
+                    ? 'payment-milestone-row payment-milestone-active'
+                    : 'payment-milestone-row'
+                }
+              >
+                <span>
+                  <strong>{milestone.label}</strong>
+                  <small>
+                    {human(milestone.kind)} / {human(milestone.status)}
+                  </small>
+                </span>
+                <strong>{money(milestone.amount)}</strong>
+                {milestone.ticket ? (
+                  <Link to={`/tickets/${milestone.ticket.id}`}>
+                    {human(milestone.ticket.status)}
+                  </Link>
+                ) : (
+                  <small>No ticket yet</small>
+                )}
+              </div>
+            ))}
+          </div>
+          {ticket.paymentMilestone.paymentPlan.aiVerificationNotes ? (
+            <p className="muted">{ticket.paymentMilestone.paymentPlan.aiVerificationNotes}</p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {canSubmitRemainingProof ? (
         <section className="ticket-panel ticket-cfo-panel">
           <div>
-            <h3>Department head decision</h3>
+            <h3>Remaining payment proof</h3>
             <p className="muted">
-              Review the synced invoice and PO details. You can approve it for finance or reject it
-              with a reason for the department to fix.
+              Advance payment is complete. Upload GRN, delivery note, receipt, or final invoice proof,
+              then submit this remaining payment to AP finance.
             </p>
-            <div className="field">
-              <label htmlFor="rejectReason">Reject reason</label>
-              <textarea
-                id="rejectReason"
-                rows={2}
-                value={rejectReason}
-                onChange={(event) => setRejectReason(event.target.value)}
-                placeholder="Required if rejecting"
-              />
-            </div>
           </div>
           <div className="row-actions">
             <button
               type="button"
               className="btn btn-primary"
-              disabled={decideApproval.isPending}
-              onClick={() => decideApproval.mutate(true)}
+              disabled={submitToFinance.isPending}
+              onClick={submitRemainingProof}
             >
-              Approve for finance
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger"
-              disabled={decideApproval.isPending || !rejectReason.trim()}
-              onClick={() => decideApproval.mutate(false)}
-            >
-              Reject
+              Submit remaining proof
             </button>
           </div>
+        </section>
+      ) : null}
+
+      {agentScopeMessage ? (
+        <section className="ticket-panel agent-scope-panel">
+          <div>
+            <p className="eyebrow">Agentic validation</p>
+            <h3>
+              {canApFinalReview
+                ? 'AP Finance final review'
+                : isDepartmentAgentStage
+                  ? 'Department draft / rework'
+                  : 'AI verification in progress'}
+            </h3>
+            <p className="muted">{agentScopeMessage}</p>
+            {ticket.missingDocuments.length ? (
+              <p className="missing-line">Missing: {ticket.missingDocuments.join(', ')}</p>
+            ) : null}
+          </div>
+          {canApFinalReview ? (
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={update.isPending}
+                onClick={() =>
+                  moveTicketStatus('CFO_SIGN_PENDING', { bankPaymentStatus: 'UPLOADED' })
+                }
+              >
+                Send to CFO sign
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={update.isPending}
+                onClick={() =>
+                  moveTicketStatus('WAITING_FOR_DOCS', {
+                    documentStatus: 'INCOMPLETE',
+                    missingDocuments: ['Additional proof requested in comments'],
+                  })
+                }
+              >
+                Request proof
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
       <section className="ticket-role-scope">
         <article className={canEditSubmission ? 'scope-card scope-card-active' : 'scope-card'}>
           <strong>Department submission</strong>
-          <span>Request details, PO reference, invoice basics, missing-doc response.</span>
+          <span>Request details, PO reference, invoice basics, proof uploads, and rework.</span>
         </article>
-        <article className={canEditFinance ? 'scope-card scope-card-active' : 'scope-card'}>
-          <strong>AP finance</strong>
-          <span>Document check, vendor/account verification, WHT, voucher, Xero, bank execution.</span>
+        <article className={isAgentOwnedStage || isDepartmentAgentStage ? 'scope-card scope-card-active' : 'scope-card'}>
+          <strong>AI validation agent</strong>
+          <span>Document completeness, vendor, PO, account, WHT, voucher, Xero, and payment readiness.</span>
+        </article>
+        <article className={canApFinalReview ? 'scope-card scope-card-active' : 'scope-card'}>
+          <strong>AP finance final review</strong>
+          <span>One human check, proof request through comments, or send to CFO sign.</span>
         </article>
         <article className={canEditCfoSign ? 'scope-card scope-card-active' : 'scope-card'}>
           <strong>CFO authorization</strong>
@@ -890,25 +1314,45 @@ export function TicketDetailPage() {
         </article>
       </section>
 
-      {ticket.status === 'CFO_SIGN_PENDING' || isCfo ? (
+      {isCfo && ticket.status === 'CFO_SIGN_PENDING' ? (
         <section className="ticket-panel ticket-cfo-panel">
           <div>
             <h3>CFO bank authorization</h3>
             <p className="muted">
               CFO opens the sign-pending ticket from the board, verifies the bank portal payment,
-              signs it, then the ticket returns to AP for bank execution and Xero close.
+              signs it, then the payment gateway, Xero paid marker, requester notification, and close
+              steps run automatically.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() =>
-              moveTicketStatus('BANK_EXECUTION_PENDING', { bankPaymentStatus: 'CFO_SIGNED' })
-            }
-            disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING' || update.isPending}
-          >
-            Record CFO sign
-          </button>
+          <div className="cfo-action-stack">
+            <textarea
+              rows={3}
+              value={cfoRejectReason}
+              onChange={(event) => setCfoRejectReason(event.target.value)}
+              placeholder="Reason if rejecting this payment"
+              disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING'}
+            />
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() =>
+                  moveTicketStatus('BANK_EXECUTION_PENDING', { bankPaymentStatus: 'CFO_SIGNED' })
+                }
+                disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING' || update.isPending}
+              >
+                Sign and auto close
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={rejectByCfo}
+                disabled={!canEditCfoSign || ticket.status !== 'CFO_SIGN_PENDING' || cfoReject.isPending}
+              >
+                Reject to department
+              </button>
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -925,16 +1369,26 @@ export function TicketDetailPage() {
             </p>
           </div>
           {ticket.status === 'BANK_EXECUTION_PENDING' ? (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() =>
-                moveTicketStatus('BANK_EXECUTED', { bankPaymentStatus: 'EXECUTED' })
-              }
-              disabled={!canEdit('status') || update.isPending}
-            >
-              Record bank execution
-            </button>
+            <div className="row-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={runTestBank}
+                disabled={runTestBankAutomation.isPending}
+              >
+                Run test bank auto close
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() =>
+                  moveTicketStatus('BANK_EXECUTED', { bankPaymentStatus: 'EXECUTED' })
+                }
+                disabled={!canEdit('status') || update.isPending}
+              >
+                Record bank execution
+              </button>
+            </div>
           ) : null}
           {ticket.status === 'BANK_EXECUTED' ? (
             <button
@@ -969,6 +1423,8 @@ export function TicketDetailPage() {
         </section>
       ) : null}
 
+      <div className="ticket-review-layout">
+        <div className="ticket-review-fields">
       <form className="ticket-edit-grid" onSubmit={onSubmit}>
         <section className="ticket-panel">
           <h3>Workflow</h3>
@@ -1006,7 +1462,7 @@ export function TicketDetailPage() {
               <option value="">Unassigned</option>
               {assignees.map((assignee) => (
                 <option key={assignee.id} value={assignee.id}>
-                  {assignee.name}
+                  {displayPersonName(assignee.name)}
                 </option>
               ))}
             </select>
@@ -1337,6 +1793,18 @@ export function TicketDetailPage() {
           </div>
         )}
       </form>
+        </div>
+
+        <InvoicePreviewPanel
+          attachments={attachments}
+          previewableAttachments={previewableAttachments}
+          selectedAttachment={selectedPreviewAttachment}
+          previewUrl={previewUrl}
+          previewError={previewError}
+          onSelect={setSelectedPreviewId}
+          onDownload={downloadAttachment}
+        />
+      </div>
 
       <section className="ticket-panel ticket-wide-panel">
         <div className="attachment-header">
@@ -1372,17 +1840,28 @@ export function TicketDetailPage() {
                   <strong>{attachment.fileName}</strong>
                   <small>
                     {human(attachment.documentType)} / {fileSizeText(attachment.fileSize)} /
-                    uploaded by {attachment.uploadedBy?.name ?? 'System'} on{' '}
+                    uploaded by {displayPersonName(attachment.uploadedBy?.name)} on{' '}
                     {dateText(attachment.uploadedAt)}
                   </small>
                 </span>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => downloadAttachment(attachment)}
-                >
-                  Download
-                </button>
+                <div className="row-actions">
+                  {isPreviewableAttachment(attachment) ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setSelectedPreviewId(attachment.id)}
+                    >
+                      Preview
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => downloadAttachment(attachment)}
+                  >
+                    Download
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -1439,7 +1918,7 @@ export function TicketDetailPage() {
                 <span>{activity.message}</span>
                 <small>
                   {activity.type === 'comment' ? 'Comment / ' : ''}
-                  {activity.actor?.name ?? 'System'} / {dateText(activity.createdAt)}
+                  {displayPersonName(activity.actor?.name)} / {dateText(activity.createdAt)}
                 </small>
               </div>
             ))
@@ -1449,6 +1928,111 @@ export function TicketDetailPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+function InvoicePreviewPanel({
+  attachments,
+  previewableAttachments,
+  selectedAttachment,
+  previewUrl,
+  previewError,
+  onSelect,
+  onDownload,
+}: {
+  attachments: TicketAttachment[];
+  previewableAttachments: TicketAttachment[];
+  selectedAttachment: TicketAttachment | null;
+  previewUrl: string | null;
+  previewError: string;
+  onSelect: (id: string) => void;
+  onDownload: (attachment: TicketAttachment) => void;
+}) {
+  const hasAttachments = attachments.length > 0;
+  const isImage = selectedAttachment ? isImageAttachment(selectedAttachment) : false;
+  const isPdf = selectedAttachment ? isPdfAttachment(selectedAttachment) : false;
+  const isText = selectedAttachment ? isPlainTextAttachment(selectedAttachment) : false;
+
+  return (
+    <aside className="ticket-panel invoice-preview-panel">
+      <div className="invoice-preview-header">
+        <div>
+          <p className="eyebrow">Uploaded invoice</p>
+          <h3>Side-by-side validation</h3>
+          <p className="muted">
+            Keep the source invoice open while validating filled AP fields.
+          </p>
+        </div>
+        {selectedAttachment ? (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onDownload(selectedAttachment)}
+          >
+            Download
+          </button>
+        ) : null}
+      </div>
+
+      {previewableAttachments.length ? (
+        <div className="preview-selector" aria-label="Select attachment preview">
+          {previewableAttachments.map((attachment) => (
+            <button
+              type="button"
+              key={attachment.id}
+              className={
+                selectedAttachment?.id === attachment.id
+                  ? 'preview-chip preview-chip-active'
+                  : 'preview-chip'
+              }
+              onClick={() => onSelect(attachment.id)}
+            >
+              <span>{attachment.documentType.replaceAll('_', ' ').toLowerCase()}</span>
+              <strong>{attachment.fileName}</strong>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="invoice-preview-frame">
+        {!hasAttachments ? (
+          <p className="empty-state">No uploaded invoice or supporting file is attached yet.</p>
+        ) : previewError ? (
+          <p className="empty-state">{previewError}</p>
+        ) : !selectedAttachment ? (
+          <p className="empty-state">
+            Image and PDF slips preview here. Spreadsheet uploads stay in attachments and do not auto-download.
+          </p>
+        ) : !previewUrl ? (
+          <p className="empty-state">Loading preview...</p>
+        ) : isImage ? (
+          <img src={previewUrl} alt={selectedAttachment.fileName} />
+        ) : isPdf || isText ? (
+          <iframe title={selectedAttachment.fileName} src={previewUrl} />
+        ) : (
+          <p className="empty-state">
+            Preview is not supported for this file type. Use download for this attachment.
+          </p>
+        )}
+      </div>
+
+      {selectedAttachment ? (
+        <div className="invoice-preview-meta">
+          <span>
+            <small>File</small>
+            <strong>{selectedAttachment.fileName}</strong>
+          </span>
+          <span>
+            <small>Type</small>
+            <strong>{human(selectedAttachment.documentType)}</strong>
+          </span>
+          <span>
+            <small>Size</small>
+            <strong>{fileSizeText(selectedAttachment.fileSize)}</strong>
+          </span>
+        </div>
+      ) : null}
+    </aside>
   );
 }
 

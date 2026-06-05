@@ -17,6 +17,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem('ap_token');
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
 export type User = {
   id: string;
   email: string;
@@ -35,7 +48,24 @@ export type RegisterPayload = {
   email: string;
   password: string;
   departmentId: string;
-  role: string;
+};
+
+export type RegisterDepartmentPayload = {
+  departmentName: string;
+  departmentCode?: string;
+  name: string;
+  email: string;
+  password: string;
+};
+
+export type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
 };
 
 export async function login(email: string, password: string, departmentId: string) {
@@ -50,6 +80,15 @@ export async function login(email: string, password: string, departmentId: strin
 export async function register(payload: RegisterPayload) {
   const { data } = await api.post<{ accessToken: string; user: User }>(
     '/api/auth/register',
+    payload,
+  );
+  localStorage.setItem('ap_token', data.accessToken);
+  return data.user;
+}
+
+export async function registerDepartment(payload: RegisterDepartmentPayload) {
+  const { data } = await api.post<{ accessToken: string; user: User }>(
+    '/api/auth/register-department',
     payload,
   );
   localStorage.setItem('ap_token', data.accessToken);

@@ -3072,12 +3072,86 @@ td {
 
 .invoice-preview-frame img {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   min-width: 0;
   min-height: 0;
   object-fit: contain;
   object-position: center center;
+}
+
+.cfo-action-stack {
+  display: grid;
+  min-width: min(420px, 100%);
+  gap: 10px;
+}
+
+.cfo-action-stack textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+}
+
+.vendor-details {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.vendor-details-compact {
+  margin: 0;
+  align-self: stretch;
+}
+
+.vendor-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vendor-details-header strong {
+  color: var(--navy);
+}
+
+.vendor-details-header span {
+  color: var(--teal-dark);
+  font-weight: 900;
+}
+
+.vendor-details-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.vendor-details-grid span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.vendor-details-grid small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.vendor-details-grid strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
 }
 
 .invoice-preview-frame iframe {
@@ -3519,5 +3593,177 @@ td {
 
   .tree-node-values {
     justify-items: start;
+  }
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+  padding: 0.35rem;
+  margin: 1rem 0;
+  border: 1px solid #d7e0ea;
+  border-radius: 8px;
+  background: #eef4f8;
+}
+
+.segmented-control button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  color: #496176;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.segmented-control button.active {
+  color: #092338;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 10%);
+}
+
+.auth-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.role-lock {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.75rem;
+  margin: 0.4rem 0 0.85rem;
+  border: 1px solid #b7e4de;
+  border-radius: 8px;
+  background: #effdfa;
+  color: #0f3e44;
+}
+
+.role-lock strong {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.role-lock span {
+  font-size: 0.86rem;
+  color: #40636a;
+}
+
+.nav-badge {
+  min-width: 1.35rem;
+  height: 1.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border-radius: 999px;
+  background: #14b8a6;
+  color: #052f34;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.notifications-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.notifications-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.notification-stat {
+  min-width: 120px;
+  padding: 1rem;
+  border-radius: 8px;
+  background: #effdfa;
+  border: 1px solid #b7e4de;
+  text-align: center;
+}
+
+.notification-stat strong {
+  display: block;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.notification-stat span {
+  color: #4d6373;
+  font-weight: 800;
+}
+
+.notification-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.notification-row {
+  display: grid;
+  grid-template-columns: 0.75rem 1fr;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border: 1px solid #d8e2ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.notification-row.unread {
+  border-color: #14b8a6;
+  background: #f3fffc;
+}
+
+.notification-row.read {
+  opacity: 0.78;
+}
+
+.notification-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-top: 0.35rem;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.notification-row.unread .notification-dot {
+  background: #14b8a6;
+}
+
+.notification-row-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.notification-row-header span {
+  color: #64748b;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.notification-row p {
+  margin: 0.35rem 0 0.7rem;
+  color: #46596d;
+}
+
+.notification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+@media (max-width: 720px) {
+  .auth-form-grid,
+  .segmented-control {
+    grid-template-columns: 1fr;
+  }
+
+  .notifications-hero,
+  .notification-row-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

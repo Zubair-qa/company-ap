@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   AccountVerificationStatus,
   BankPaymentStatus,
@@ -13,6 +14,7 @@ import {
   ExpenseNature,
   FilerStatus,
   InvoiceStatus,
+  NotificationType,
   PaymentMilestoneKind,
   PaymentMilestoneStatus,
   Prisma,
@@ -92,28 +94,18 @@ export const TICKET_BOARD_COLUMNS = [
     statuses: [TicketStatus.ADVANCE_PAID_REMAINING_PENDING],
   },
   {
-    id: 'department_verification',
-    label: 'AI document verification',
-    scope: 'Agent checks invoice, PO, GRN/receipt, and required proof before AP sees the ticket.',
-    statuses: [TicketStatus.DOCS_REVIEW],
-  },
-  {
-    id: 'data_verification',
-    label: 'AI data verification',
-    scope: 'Agent verifies vendor, PO, account evidence, invoice reference, amount, WHT readiness, and voucher readiness.',
+    id: 'ap_finance_final_review',
+    label: 'AP finance final review',
+    scope: 'AI verification runs in the background; AP finance performs one final tax, voucher, and payment review before CFO sign.',
     statuses: [
+      TicketStatus.DOCS_REVIEW,
       TicketStatus.VENDOR_PO_ACCOUNT_VERIFICATION,
       TicketStatus.WHT_CALCULATION,
       TicketStatus.VOUCHER_GENERATION,
       TicketStatus.XERO_BILL_ENTRY,
       TicketStatus.PAYMENT_PREPARATION,
+      TicketStatus.BANK_UPLOAD,
     ],
-  },
-  {
-    id: 'ap_finance_final_review',
-    label: 'AP finance final review',
-    scope: 'AP finance performs one human check, requests proof in comments if needed, or sends to CFO sign.',
-    statuses: [TicketStatus.BANK_UPLOAD],
   },
   {
     id: 'payment_disbursement',
@@ -299,6 +291,9 @@ const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
   [TicketStatus.BANK_UPLOAD]: [
     'status',
     'assignedToId',
+    'whtFilerStatus',
+    'whtRate',
+    'voucherNumber',
     'bankPaymentStatus',
     'bankPortalReference',
     'notes',
@@ -469,6 +464,26 @@ const attachmentInclude = Prisma.validator<Prisma.SupportingDocumentInclude>()({
 
 type RequestUser = { id: string; role: Role; departmentId: string | null };
 
+type NotificationUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  departmentId: string | null;
+};
+
+type NotificationTicket = {
+  id: string;
+  title: string;
+  status: TicketStatus;
+  departmentId: string;
+  assignedToId: string | null;
+  createdById: string | null;
+  requesterEmail: string | null;
+  internalReference: string | null;
+  invoiceNumber: string | null;
+};
+
 type WorkflowAgentDecision = {
   fromStatus: TicketStatus;
   toStatus: TicketStatus;
@@ -570,6 +585,73 @@ function decimalNumber(value: Prisma.Decimal | null | undefined) {
   if (value == null) return 0;
   const amount = Number(value.toString());
   return Number.isFinite(amount) ? amount : 0;
+}
+
+function jsonRecord(value: Prisma.JsonValue | null | undefined) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function jsonText(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function optionalJsonText(value: unknown) {
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function invoiceAccountFieldsFromJson(extracted: Prisma.JsonValue | null | undefined) {
+  const data = jsonRecord(extracted) ?? {};
+  const accountSync =
+    data.accountSync && typeof data.accountSync === 'object' && !Array.isArray(data.accountSync)
+      ? (data.accountSync as Record<string, unknown>)
+      : null;
+  const vendorAccountNumber = accountSync
+    ? optionalJsonText(accountSync.vendorAccountNumber)
+    : undefined;
+  const invoiceAccountNumber = accountSync
+    ? optionalJsonText(accountSync.invoiceAccountNumber)
+    : undefined;
+  const accountVerificationSource = accountSync
+    ? optionalJsonText(accountSync.accountVerificationSource)
+    : undefined;
+
+  return {
+    hasExplicitAccountSync: Boolean(accountSync),
+    vendorAccountNumber:
+      vendorAccountNumber !== undefined
+        ? vendorAccountNumber
+        : jsonText(data.vendorAccountNumber),
+    invoiceAccountNumber:
+      invoiceAccountNumber !== undefined
+        ? invoiceAccountNumber
+        : jsonText(data.invoiceAccountNumber),
+    accountVerificationSource:
+      accountVerificationSource !== undefined
+        ? accountVerificationSource
+        : jsonText(data.accountVerificationSource),
+  };
+}
+
+function numericJsonValue(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return null;
+  const parsed = Number(value.replace(/,/g, '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractedSlipAmount(extracted: Prisma.JsonValue | null | undefined) {
+  const data = jsonRecord(extracted);
+  if (!data) return null;
+  return numericJsonValue(data.amountPkr);
+}
+
+function hasSlipExtractionMarker(extracted: Prisma.JsonValue | null | undefined) {
+  const data = jsonRecord(extracted);
+  return Boolean(data?.invoiceSlipExtraction);
 }
 
 function financeAmount(
@@ -762,7 +844,10 @@ function uploadRoot() {
 
 @Injectable()
 export class TicketsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+  ) {}
 
   async meta(user: RequestUser) {
     const [departments, vendors, assignees] = await Promise.all([
@@ -1217,11 +1302,21 @@ export class TicketsService {
   }
 
   async getOne(id: string, user: RequestUser) {
-    const ticket = await this.prisma.paymentTicket.findFirst({
+    let ticket = await this.prisma.paymentTicket.findFirst({
       where: { id, ...this.accessWhere(user) },
       include: ticketInclude,
     });
     if (!ticket) throw new NotFoundException();
+    if (ticket.invoiceId && ticket.status !== TicketStatus.PAYMENT_COMPLETE) {
+      const synced = await this.syncTicketFromLinkedInvoice(ticket.id);
+      if (synced) {
+        ticket = await this.prisma.paymentTicket.findFirst({
+          where: { id, ...this.accessWhere(user) },
+          include: ticketInclude,
+        });
+        if (!ticket) throw new NotFoundException();
+      }
+    }
     return this.decorateTicket(ticket, user);
   }
 
@@ -1339,6 +1434,17 @@ export class TicketsService {
       ) {
         await this.assertRemainingPaymentReady(id, user);
       }
+      if (
+        existing.status === TicketStatus.BANK_UPLOAD &&
+        dto.status === TicketStatus.CFO_SIGN_PENDING
+      ) {
+        const nextFilerStatus = dto.whtFilerStatus ?? existing.whtFilerStatus;
+        if (nextFilerStatus === FilerStatus.UNKNOWN) {
+          throw new BadRequestException(
+            'AP Finance must select filer/non-filer before CFO sign',
+          );
+        }
+      }
     }
     if (dto.assignedToId !== undefined && dto.assignedToId !== existing.assignedToId) {
       await this.assertCanAssign(dto.assignedToId, user);
@@ -1423,6 +1529,14 @@ export class TicketsService {
       this.assertStatusTransition(existing.status, data.status as TicketStatus, user);
     }
     if (statusChanged) this.applyStatusSideEffects(data, data.status as TicketStatus);
+    if (
+      statusChanged &&
+      existing.status === TicketStatus.CFO_SIGN_PENDING &&
+      data.status === TicketStatus.BANK_EXECUTION_PENDING &&
+      user.role === Role.CFO
+    ) {
+      this.applyCfoSignAutoCloseSideEffects(data, existing);
+    }
 
     const updated = await this.prisma.paymentTicket.update({
       where: { id },
@@ -1442,9 +1556,19 @@ export class TicketsService {
       },
       include: ticketInclude,
     });
+    await this.syncInvoiceFromTicket(updated.id);
+    if (statusChanged) {
+      await this.notifyTicketStatusChanged(
+        updated.id,
+        user,
+        existing.status,
+        data.status as TicketStatus,
+      );
+    }
     if (statusChanged && data.status === TicketStatus.PAYMENT_COMPLETE) {
       await this.handleMilestonePaymentComplete(updated.id, user.id);
-      return this.getOne(updated.id, user);
+      await this.markStandaloneInvoicePaid(updated.id);
+      return this.decorateTicket(updated, user);
     }
     if (this.shouldRunWorkflowAgentAfterUpdate(existing.status, user, dto, statusChanged)) {
       const agentResult = await this.runWorkflowAgent(updated.id, user);
@@ -1540,6 +1664,13 @@ export class TicketsService {
       include: ticketInclude,
     });
 
+    await this.notifyTicketStatusChanged(
+      updated.id,
+      user,
+      existing.status,
+      TicketStatus.PAYMENT_COMPLETE,
+    );
+
     if (milestone) {
       await this.handleMilestonePaymentComplete(updated.id, user.id);
     }
@@ -1569,6 +1700,13 @@ export class TicketsService {
       where: { id, ...this.accessWhere(user) },
       include: {
         attachments: true,
+        invoice: {
+          select: {
+            id: true,
+            amountPkr: true,
+            extracted: true,
+          },
+        },
         parentTicket: true,
         paymentMilestone: {
           include: {
@@ -1651,7 +1789,7 @@ export class TicketsService {
         data.bankPaymentStatus = BankPaymentStatus.READY_FOR_UPLOAD;
         setStatus(TicketStatus.BANK_UPLOAD);
         summary =
-          'Agent verified documents/data, prepared tax/voucher/payment readiness, and released the ticket to AP finance final review.';
+          'Agent verified documents/data, prepared voucher/payment readiness, and released the ticket to AP finance final review.';
         confidence = 95;
       }
       checks.push(
@@ -1659,7 +1797,7 @@ export class TicketsService {
         'Vendor details',
         'PO/invoice reference',
         'Account evidence',
-        'Amount validation',
+        'Slip amount vs entered amount',
         'Finance due date rule',
       );
     } else if (user.role === Role.AP_CLERK || user.role === Role.COMPANY_ADMIN) {
@@ -1746,7 +1884,7 @@ export class TicketsService {
                 : XeroSyncStatus.READY_TO_SYNC;
             data.bankPaymentStatus = BankPaymentStatus.READY_FOR_UPLOAD;
             setStatus(TicketStatus.BANK_UPLOAD);
-            summary = 'Agent verified vendor, PO, account, tax, and voucher readiness for AP final review.';
+            summary = 'Agent verified vendor, PO, account, and voucher readiness for AP final review.';
             confidence = 93;
           }
           break;
@@ -1879,6 +2017,10 @@ export class TicketsService {
       include: ticketInclude,
     });
 
+    if (statusChanged) {
+      await this.notifyTicketStatusChanged(updated.id, user, fromStatus, toStatus);
+    }
+
     if (statusChanged && toStatus === TicketStatus.PAYMENT_COMPLETE) {
       await this.handleMilestonePaymentComplete(updated.id, user.id);
     }
@@ -1957,7 +2099,62 @@ export class TicketsService {
       },
     });
 
+    await this.notifyTicketComment(id, user, trimmed);
+
     return this.getOne(id, user);
+  }
+
+  async rejectFromCfo(id: string, reason: string | undefined, user: RequestUser) {
+    if (user.role !== Role.CFO) {
+      throw new ForbiddenException('Only CFO can reject CFO sign pending tickets');
+    }
+    const trimmedReason = String(reason ?? '').trim();
+    if (!trimmedReason) throw new BadRequestException('CFO rejection reason is required');
+
+    const existing = await this.prisma.paymentTicket.findFirst({
+      where: { id, ...this.accessWhere(user) },
+    });
+    if (!existing) throw new NotFoundException();
+    if (existing.status !== TicketStatus.CFO_SIGN_PENDING) {
+      throw new BadRequestException('CFO can reject only tickets waiting for CFO sign');
+    }
+
+    const data: Prisma.PaymentTicketUpdateInput = {
+      status: TicketStatus.WAITING_FOR_DOCS,
+      documentStatus: DocumentStatus.INCOMPLETE,
+      missingDocuments: [`CFO rejected: ${trimmedReason}`],
+      submittedToFinanceAt: null,
+      dueDate: null,
+      bankPaymentStatus: BankPaymentStatus.FAILED,
+      notes: existing.notes
+        ? `${existing.notes}\n\nCFO rejected: ${trimmedReason}`
+        : `CFO rejected: ${trimmedReason}`,
+      activities: {
+        create: {
+          actor: { connect: { id: user.id } },
+          type: 'cfo_rejected',
+          message: `CFO rejected payment: ${trimmedReason}`,
+          fromStatus: TicketStatus.CFO_SIGN_PENDING,
+          toStatus: TicketStatus.WAITING_FOR_DOCS,
+        },
+      },
+    };
+    this.applyStatusSideEffects(data, TicketStatus.WAITING_FOR_DOCS);
+
+    const updated = await this.prisma.paymentTicket.update({
+      where: { id },
+      data,
+      include: ticketInclude,
+    });
+
+    await this.notifyTicketStatusChanged(
+      updated.id,
+      user,
+      TicketStatus.CFO_SIGN_PENDING,
+      TicketStatus.WAITING_FOR_DOCS,
+    );
+
+    return this.decorateTicket(updated, user);
   }
 
   async uploadAttachment(
@@ -1991,6 +2188,7 @@ export class TicketsService {
       },
     });
 
+    await this.notifyTicketAttachment(id, user, file.originalname);
     await this.runDocumentAgentAfterAttachment(id, ticket.status, user);
 
     return this.serializeAttachment(doc);
@@ -2106,8 +2304,201 @@ export class TicketsService {
     });
   }
 
-  private async handleMilestonePaymentComplete(ticketId: string, actorId: string) {
-    const milestone = await this.prisma.paymentMilestone.findUnique({
+  private async syncInvoiceFromTicket(ticketId: string) {
+    const ticket = await this.prisma.paymentTicket.findUnique({
+      where: { id: ticketId },
+      include: {
+        invoice: true,
+        paymentMilestone: true,
+      },
+    });
+    if (!ticket?.invoiceId || !ticket.invoice) return;
+
+    const invoice = ticket.invoice;
+    const fullInvoiceTicket =
+      !ticket.paymentMilestone || ticket.paymentMilestone.kind === PaymentMilestoneKind.FULL;
+    const data: Prisma.InvoiceUpdateInput = {};
+
+    if (ticket.invoiceNumber !== invoice.invoiceNumber) {
+      data.invoiceNumber = ticket.invoiceNumber;
+    }
+    const internalReferenceLooksAuto = /^AP-[0-9A-F]{8}$/i.test(ticket.internalReference ?? '');
+    const nextReference =
+      ticket.internalReference && !internalReferenceLooksAuto
+        ? ticket.internalReference
+        : invoice.reference ?? ticket.internalReference ?? ticket.invoiceNumber;
+    if (nextReference !== invoice.reference) {
+      data.reference = nextReference;
+    }
+    if (ticket.notes && ticket.notes !== invoice.description) {
+      data.description = ticket.notes;
+    }
+    if (ticket.departmentId !== invoice.departmentId) {
+      data.department = { connect: { id: ticket.departmentId } };
+    }
+    if (ticket.vendorId !== invoice.vendorId) {
+      data.vendor = ticket.vendorId
+        ? { connect: { id: ticket.vendorId } }
+        : { disconnect: true };
+    }
+
+    if (fullInvoiceTicket && !ticket.amountPkr.equals(invoice.amountPkr)) {
+      const balanceDue = ticket.amountPkr.minus(invoice.amountPaid);
+      data.amountPkr = ticket.amountPkr;
+      data.subtotal = ticket.amountPkr;
+      data.totalAmount = ticket.amountPkr;
+      data.balanceDue = balanceDue.gt(0) ? balanceDue : new Prisma.Decimal(0);
+    }
+
+    if (
+      ticket.vendorAccountNumber ||
+      ticket.invoiceAccountNumber ||
+      ticket.accountVerificationSource
+    ) {
+      const existingExtracted = jsonRecord(invoice.extracted) ?? {};
+      const existingAccountSync =
+        existingExtracted.accountSync &&
+        typeof existingExtracted.accountSync === 'object' &&
+        !Array.isArray(existingExtracted.accountSync)
+          ? (existingExtracted.accountSync as Record<string, unknown>)
+          : {};
+      const nextAccountSync = {
+        ...existingAccountSync,
+        vendorAccountNumber: ticket.vendorAccountNumber,
+        invoiceAccountNumber: ticket.invoiceAccountNumber,
+        accountVerificationSource: ticket.accountVerificationSource,
+        updatedAt: new Date().toISOString(),
+      };
+      data.extracted = {
+        ...existingExtracted,
+        vendorAccountNumber: ticket.vendorAccountNumber,
+        invoiceAccountNumber: ticket.invoiceAccountNumber,
+        accountVerificationSource: ticket.accountVerificationSource,
+        accountSync: nextAccountSync,
+      } as Prisma.InputJsonValue;
+    }
+
+    if (Object.keys(data).length) {
+      await this.prisma.invoice.update({ where: { id: invoice.id }, data });
+    }
+
+    if (invoice.poId) {
+      const poData: Prisma.PurchaseOrderUpdateInput = {};
+      if (ticket.purchaseOrderNumber) {
+        const duplicate = await this.prisma.purchaseOrder.findFirst({
+          where: {
+            poNumber: ticket.purchaseOrderNumber,
+            id: { not: invoice.poId },
+          },
+          select: { id: true },
+        });
+        if (!duplicate) poData.poNumber = ticket.purchaseOrderNumber;
+      }
+      if (ticket.departmentId !== invoice.departmentId) {
+        poData.department = { connect: { id: ticket.departmentId } };
+      }
+      if (ticket.vendorId !== invoice.vendorId && ticket.vendorId) {
+        poData.vendor = { connect: { id: ticket.vendorId } };
+      }
+      if (fullInvoiceTicket) {
+        poData.subtotal = ticket.amountPkr;
+        poData.totalAmount = ticket.amountPkr;
+      }
+      if (Object.keys(poData).length) {
+        await this.prisma.purchaseOrder.update({
+          where: { id: invoice.poId },
+          data: poData,
+        });
+      }
+    }
+  }
+
+  private async syncTicketFromLinkedInvoice(ticketId: string) {
+    const ticket = await this.prisma.paymentTicket.findUnique({
+      where: { id: ticketId },
+      include: {
+        invoice: { include: { vendor: true } },
+      },
+    });
+    if (!ticket?.invoiceId || !ticket.invoice) return false;
+
+    const invoice = ticket.invoice;
+    const accountFields = invoiceAccountFieldsFromJson(invoice.extracted);
+    const data: Prisma.PaymentTicketUpdateInput = {};
+    const internalReference =
+      invoice.reference ?? ticket.internalReference ?? `AP-${invoice.id.slice(0, 8).toUpperCase()}`;
+    const invoiceNumber = invoice.invoiceNumber ?? invoice.reference ?? ticket.invoiceNumber;
+
+    if (internalReference !== ticket.internalReference) {
+      data.internalReference = internalReference;
+    }
+    if (invoiceNumber !== ticket.invoiceNumber) {
+      data.invoiceNumber = invoiceNumber;
+    }
+    if (invoice.vendorId !== ticket.vendorId) {
+      data.vendor = invoice.vendorId
+        ? { connect: { id: invoice.vendorId } }
+        : { disconnect: true };
+    }
+    if (invoice.vendor?.displayName && invoice.vendor.displayName !== ticket.vendorNameSnapshot) {
+      data.vendorNameSnapshot = invoice.vendor.displayName;
+    }
+
+    if (accountFields.hasExplicitAccountSync) {
+      if (accountFields.vendorAccountNumber !== ticket.vendorAccountNumber) {
+        data.vendorAccountNumber = accountFields.vendorAccountNumber;
+      }
+      if (accountFields.invoiceAccountNumber !== ticket.invoiceAccountNumber) {
+        data.invoiceAccountNumber = accountFields.invoiceAccountNumber;
+      }
+      if (accountFields.accountVerificationSource !== ticket.accountVerificationSource) {
+        data.accountVerificationSource = accountFields.accountVerificationSource;
+      }
+    } else {
+      if (
+        accountFields.vendorAccountNumber &&
+        accountFields.vendorAccountNumber !== ticket.vendorAccountNumber
+      ) {
+        data.vendorAccountNumber = accountFields.vendorAccountNumber;
+      }
+      if (
+        accountFields.invoiceAccountNumber &&
+        accountFields.invoiceAccountNumber !== ticket.invoiceAccountNumber
+      ) {
+        data.invoiceAccountNumber = accountFields.invoiceAccountNumber;
+      }
+      if (
+        accountFields.accountVerificationSource &&
+        accountFields.accountVerificationSource !== ticket.accountVerificationSource
+      ) {
+        data.accountVerificationSource = accountFields.accountVerificationSource;
+      }
+    }
+
+    if (!Object.keys(data).length) return false;
+    await this.prisma.paymentTicket.update({ where: { id: ticket.id }, data });
+    return true;
+  }
+
+  private async markStandaloneInvoicePaid(ticketId: string) {
+    const ticket = await this.prisma.paymentTicket.findUnique({
+      where: { id: ticketId },
+      include: { paymentMilestone: true },
+    });
+    if (!ticket?.invoiceId || ticket.paymentMilestone) return;
+    const paidAmount = ticket.netPayablePkr ?? ticket.amountPkr;
+    await this.prisma.invoice.update({
+      where: { id: ticket.invoiceId },
+      data: {
+        status: InvoiceStatus.PAID,
+        amountPaid: paidAmount,
+        balanceDue: new Prisma.Decimal(0),
+      },
+    });
+  }
+
+  private async findOrAttachMilestoneForTicket(ticketId: string) {
+    const existing = await this.prisma.paymentMilestone.findUnique({
       where: { ticketId },
       include: {
         ticket: true,
@@ -2121,6 +2512,61 @@ export class TicketsService {
         },
       },
     });
+    if (existing) return existing;
+
+    const source = await this.prisma.paymentTicket.findUnique({
+      where: { id: ticketId },
+      include: {
+        invoice: {
+          include: {
+            paymentPlan: {
+              include: {
+                milestones: {
+                  include: { ticket: true },
+                  orderBy: { sequence: 'asc' },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!source?.invoice?.paymentPlan) return null;
+
+    const preferredKind =
+      source.billType === BillType.ADVANCE_PARTIAL
+        ? PaymentMilestoneKind.ADVANCE
+        : source.billType === BillType.FINAL_PARTIAL
+          ? PaymentMilestoneKind.REMAINING
+          : PaymentMilestoneKind.FULL;
+    const candidate = source.invoice.paymentPlan.milestones.find(
+      (item) => !item.ticketId && item.kind === preferredKind,
+    );
+    if (!candidate) return null;
+
+    await this.prisma.paymentMilestone.update({
+      where: { id: candidate.id },
+      data: { ticket: { connect: { id: source.id } } },
+    });
+
+    return this.prisma.paymentMilestone.findUnique({
+      where: { ticketId },
+      include: {
+        ticket: true,
+        paymentPlan: {
+          include: {
+            milestones: {
+              include: { ticket: true },
+              orderBy: { sequence: 'asc' },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  private async handleMilestonePaymentComplete(ticketId: string, actorId: string) {
+    const milestone = await this.findOrAttachMilestoneForTicket(ticketId);
     if (!milestone || !milestone.ticket) return;
 
     await this.prisma.paymentMilestone.update({
@@ -2315,6 +2761,344 @@ export class TicketsService {
     return user.role === Role.COMPANY_ADMIN || user.role === Role.AP_CLERK;
   }
 
+  private async notifyTicketStatusChanged(
+    ticketId: string,
+    actor: RequestUser,
+    fromStatus: TicketStatus,
+    toStatus: TicketStatus,
+  ) {
+    const ticket = await this.notificationTicket(ticketId);
+    if (!ticket) return;
+    const recipients = await this.usersForStatus(ticket, toStatus, actor.id);
+    const title = this.notificationTitleForStatus(toStatus);
+    const message = `${ticket.title} moved from ${fromStatus} to ${toStatus}.`;
+    await this.createNotifications(recipients, {
+      type: this.notificationTypeForStatus(toStatus),
+      title,
+      message,
+      link: `/tickets/${ticket.id}`,
+    });
+
+    if (
+      ticket.requesterEmail &&
+      this.statusIn(
+        [
+          TicketStatus.WAITING_FOR_DOCS,
+          TicketStatus.MISSING_DOCS,
+          TicketStatus.REQUESTER_PINGED,
+          TicketStatus.REQUESTER_NOTIFIED,
+          TicketStatus.PAYMENT_COMPLETE,
+        ],
+        toStatus,
+      )
+    ) {
+      await this.sendEmail(ticket.requesterEmail, title, message, `/tickets/${ticket.id}`);
+    }
+  }
+
+  private async notifyTicketComment(ticketId: string, actor: RequestUser, message: string) {
+    const ticket = await this.notificationTicket(ticketId);
+    if (!ticket) return;
+    const [recipients, mentionedUsers] = await Promise.all([
+      this.usersForComment(ticket, actor, message),
+      this.mentionedUsers(message, actor.id),
+    ]);
+    const allRecipients = this.uniqueUsers([...recipients, ...mentionedUsers]);
+    const title = mentionedUsers.length ? 'Mentioned in a ticket comment' : 'New ticket comment';
+    const body = `${this.actorLabel(actor)} commented on ${ticket.title}: ${message}`;
+    await this.createNotifications(allRecipients, {
+      type: NotificationType.QUERY_RAISED,
+      title,
+      message: body,
+      link: `/tickets/${ticket.id}`,
+    });
+  }
+
+  private async notifyTicketAttachment(
+    ticketId: string,
+    actor: RequestUser,
+    fileName: string,
+  ) {
+    const ticket = await this.notificationTicket(ticketId);
+    if (!ticket) return;
+    const recipients = await this.usersForComment(
+      ticket,
+      actor,
+      `Attachment uploaded: ${fileName}`,
+    );
+    await this.createNotifications(recipients, {
+      type: NotificationType.QUERY_RESPONDED,
+      title: 'Ticket attachment uploaded',
+      message: `${this.actorLabel(actor)} uploaded ${fileName} on ${ticket.title}.`,
+      link: `/tickets/${ticket.id}`,
+    });
+  }
+
+  private async notificationTicket(ticketId: string): Promise<NotificationTicket | null> {
+    return this.prisma.paymentTicket.findUnique({
+      where: { id: ticketId },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        departmentId: true,
+        assignedToId: true,
+        createdById: true,
+        requesterEmail: true,
+        internalReference: true,
+        invoiceNumber: true,
+      },
+    });
+  }
+
+  private async usersForStatus(
+    ticket: NotificationTicket,
+    toStatus: TicketStatus,
+    actorId: string,
+  ) {
+    const departmentUsers: Prisma.UserWhereInput = {
+      departmentId: ticket.departmentId,
+      role: { in: [Role.DEPT_USER, Role.DEPT_ADMIN] },
+    };
+    const apUsers: Prisma.UserWhereInput = {
+      role: { in: [Role.AP_CLERK, Role.COMPANY_ADMIN] },
+    };
+    const cfoUsers: Prisma.UserWhereInput = { role: Role.CFO };
+    const assignedOrCreator = [
+      ticket.assignedToId ? { id: ticket.assignedToId } : null,
+      ticket.createdById ? { id: ticket.createdById } : null,
+    ].filter(Boolean) as Prisma.UserWhereInput[];
+
+    let audience: Prisma.UserWhereInput[];
+    if (
+      this.statusIn(
+        [
+          TicketStatus.WAITING_FOR_DOCS,
+          TicketStatus.MISSING_DOCS,
+          TicketStatus.REQUESTER_PINGED,
+          TicketStatus.ADVANCE_PAID_REMAINING_PENDING,
+        ],
+        toStatus,
+      )
+    ) {
+      audience = [departmentUsers, ...assignedOrCreator];
+    } else if (toStatus === TicketStatus.CFO_SIGN_PENDING) {
+      audience = [cfoUsers, { role: Role.COMPANY_ADMIN }, ...assignedOrCreator];
+    } else if (
+      this.statusIn(
+        [
+          TicketStatus.BANK_EXECUTION_PENDING,
+          TicketStatus.BANK_EXECUTED,
+          TicketStatus.MARKED_PAID_IN_XERO,
+        ],
+        toStatus,
+      )
+    ) {
+      audience = [apUsers, cfoUsers, ...assignedOrCreator];
+    } else if (
+      this.statusIn(
+        [TicketStatus.REQUESTER_NOTIFIED, TicketStatus.PAYMENT_COMPLETE],
+        toStatus,
+      )
+    ) {
+      audience = [departmentUsers, apUsers, cfoUsers, ...assignedOrCreator];
+    } else {
+      audience = [apUsers, ...assignedOrCreator];
+    }
+
+    return this.findNotificationUsers(audience, actorId);
+  }
+
+  private async usersForComment(
+    ticket: NotificationTicket,
+    actor: RequestUser,
+    message: string,
+  ) {
+    const audience: Prisma.UserWhereInput[] = [];
+    if (ticket.assignedToId) audience.push({ id: ticket.assignedToId });
+    if (ticket.createdById) audience.push({ id: ticket.createdById });
+
+    if (actor.role === Role.DEPT_USER || actor.role === Role.DEPT_ADMIN) {
+      audience.push({ role: { in: [Role.AP_CLERK, Role.COMPANY_ADMIN] } });
+      if (ticket.status === TicketStatus.CFO_SIGN_PENDING) audience.push({ role: Role.CFO });
+    } else {
+      audience.push({
+        departmentId: ticket.departmentId,
+        role: { in: [Role.DEPT_USER, Role.DEPT_ADMIN] },
+      });
+    }
+
+    if (message.includes('@')) {
+      audience.push(...(await this.mentionedWhere(message)));
+    }
+
+    return this.findNotificationUsers(audience, actor.id);
+  }
+
+  private async mentionedUsers(message: string, actorId: string) {
+    return this.findNotificationUsers(await this.mentionedWhere(message), actorId);
+  }
+
+  private async mentionedWhere(message: string): Promise<Prisma.UserWhereInput[]> {
+    const tokens = this.mentionTokens(message);
+    if (!tokens.length) return [];
+    const users = await this.prisma.user.findMany({
+      where: { active: true },
+      select: { id: true, name: true, email: true },
+    });
+    const mentionedIds = users
+      .filter((user) => {
+        const aliases = [
+          user.email.toLowerCase(),
+          user.email.split('@')[0]?.toLowerCase(),
+          user.name.toLowerCase().replace(/\s+/g, ''),
+          user.name.toLowerCase().replace(/\s+/g, '.'),
+          user.name.toLowerCase().replace(/\s+/g, '-'),
+        ];
+        return aliases.some((alias) => tokens.includes(alias));
+      })
+      .map((user) => user.id);
+    return mentionedIds.map((id) => ({ id }));
+  }
+
+  private mentionTokens(message: string) {
+    return Array.from(message.matchAll(/@([a-zA-Z0-9._-]+(?:@[a-zA-Z0-9.-]+)?)/g)).map(
+      (match) => match[1].toLowerCase(),
+    );
+  }
+
+  private async findNotificationUsers(where: Prisma.UserWhereInput[], actorId: string) {
+    if (!where.length) return [];
+    const users = await this.prisma.user.findMany({
+      where: {
+        active: true,
+        id: { not: actorId },
+        OR: where,
+      },
+      select: { id: true, name: true, email: true, role: true, departmentId: true },
+    });
+    return this.uniqueUsers(users);
+  }
+
+  private uniqueUsers(users: NotificationUser[]) {
+    const map = new Map<string, NotificationUser>();
+    for (const user of users) map.set(user.id, user);
+    return Array.from(map.values());
+  }
+
+  private async createNotifications(
+    users: NotificationUser[],
+    payload: {
+      type: NotificationType;
+      title: string;
+      message: string;
+      link: string;
+    },
+  ) {
+    if (!users.length) return;
+    await this.prisma.notification.createMany({
+      data: users.map((user) => ({
+        userId: user.id,
+        type: payload.type,
+        title: payload.title,
+        message: payload.message,
+        link: payload.link,
+      })),
+    });
+    await Promise.all(
+      users.map((user) =>
+        this.sendEmail(user.email, payload.title, payload.message, payload.link),
+      ),
+    );
+  }
+
+  private statusIn(statuses: TicketStatus[], status: TicketStatus) {
+    return statuses.includes(status);
+  }
+
+  private notificationTitleForStatus(status: TicketStatus) {
+    if (
+      this.statusIn(
+        [
+          TicketStatus.WAITING_FOR_DOCS,
+          TicketStatus.MISSING_DOCS,
+          TicketStatus.REQUESTER_PINGED,
+        ],
+        status,
+      )
+    ) {
+      return 'Ticket needs department rework';
+    }
+    if (status === TicketStatus.BANK_UPLOAD) return 'Ticket ready for AP final review';
+    if (status === TicketStatus.CFO_SIGN_PENDING) return 'Payment pending CFO sign';
+    if (status === TicketStatus.PAYMENT_COMPLETE) return 'Payment complete';
+    return 'Ticket status updated';
+  }
+
+  private notificationTypeForStatus(status: TicketStatus) {
+    if (
+      this.statusIn(
+        [
+          TicketStatus.WAITING_FOR_DOCS,
+          TicketStatus.MISSING_DOCS,
+          TicketStatus.REQUESTER_PINGED,
+        ],
+        status,
+      )
+    ) {
+      return NotificationType.MISSING_DOCUMENTS;
+    }
+    if (status === TicketStatus.CFO_SIGN_PENDING) return NotificationType.APPROVAL_PENDING;
+    if (status === TicketStatus.PAYMENT_COMPLETE) return NotificationType.PAYMENT_COMPLETED;
+    return NotificationType.APPROVAL_PENDING;
+  }
+
+  private actorLabel(actor: RequestUser) {
+    if (actor.role === Role.AP_CLERK) return 'AP Finance';
+    return actor.role.replaceAll('_', ' ').toLowerCase();
+  }
+
+  private async sendEmail(to: string, subject: string, message: string, link: string) {
+    const webhook = this.config.get<string>('EMAIL_WEBHOOK_URL');
+    const apiKey = this.config.get<string>('EMAIL_WEBHOOK_API_KEY');
+    const frontendUrl = this.config.get<string>('FRONTEND_URL') ?? 'http://127.0.0.1:5173';
+    const absoluteLink = `${frontendUrl.replace(/\/$/, '')}${link}`;
+    const text = `${message}\n\nOpen: ${absoluteLink}`;
+    const html = [
+      '<div style="font-family:Arial,sans-serif;line-height:1.5;color:#132238">',
+      `<h2 style="margin:0 0 12px">${this.escapeHtml(subject)}</h2>`,
+      `<p>${this.escapeHtml(message)}</p>`,
+      `<p><a href="${this.escapeHtml(absoluteLink)}">Open in Company AP</a></p>`,
+      '</div>',
+    ].join('');
+
+    if (!webhook) {
+      console.info(`[email notification] ${to} | ${subject} | ${absoluteLink}`);
+      return;
+    }
+
+    try {
+      await fetch(webhook, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({ to, subject, text, html }),
+      });
+    } catch (error) {
+      console.error('Email notification failed', error);
+    }
+  }
+
+  private escapeHtml(value: string) {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+  }
+
   private async assertTicketVisible(id: string, user: RequestUser) {
     const ticket = await this.prisma.paymentTicket.findFirst({
       where: { id, ...this.accessWhere(user) },
@@ -2456,6 +3240,8 @@ export class TicketsService {
     legacySheetRowId: string | null;
     oldReference: string | null;
     attachments: Array<{ documentType: DocumentType }>;
+    invoice: { extracted: Prisma.JsonValue | null; amountPkr: Prisma.Decimal } | null;
+    paymentMilestone?: { kind: PaymentMilestoneKind } | null;
   }) {
     const gaps = [...this.requiredDocumentGaps(ticket)];
     if (!ticket.vendorId && !ticket.vendorNameSnapshot) {
@@ -2466,6 +3252,22 @@ export class TicketsService {
     }
     if (ticket.amountPkr.lte(0)) {
       gaps.push('Positive invoice amount');
+    }
+    if (ticket.invoice && hasSlipExtractionMarker(ticket.invoice.extracted)) {
+      const slipAmount = extractedSlipAmount(ticket.invoice.extracted);
+      if (slipAmount != null && slipAmount > 0) {
+        const slipAmountPkr = new Prisma.Decimal(slipAmount);
+        const compareAmount =
+          ticket.paymentMilestone && ticket.paymentMilestone.kind !== PaymentMilestoneKind.FULL
+            ? ticket.invoice.amountPkr
+            : ticket.amountPkr;
+        const difference = compareAmount.minus(slipAmountPkr).abs();
+        if (difference.gt(new Prisma.Decimal(0.5))) {
+          gaps.push(
+            `Invoice slip amount PKR ${slipAmountPkr.toFixed(2)} does not match entered invoice amount PKR ${compareAmount.toFixed(2)}`,
+          );
+        }
+      }
     }
 
     const hasAccountEvidence =
@@ -2586,6 +3388,14 @@ export class TicketsService {
     if (user.role === Role.CFO && existing.status !== TicketStatus.CFO_SIGN_PENDING) {
       throw new ForbiddenException('CFO can only sign tickets waiting for CFO authorization');
     }
+    if (
+      user.role !== Role.CFO &&
+      existing.status === TicketStatus.CFO_SIGN_PENDING &&
+      (dto.status === TicketStatus.BANK_EXECUTION_PENDING ||
+        dto.bankPaymentStatus === BankPaymentStatus.CFO_SIGNED)
+    ) {
+      throw new ForbiddenException('Only CFO can sign CFO authorization tickets');
+    }
 
     const allowed = this.editableFields(user.role, existing.status);
     const forbidden = keys.filter((key) => !allowed.has(key));
@@ -2643,6 +3453,32 @@ export class TicketsService {
     if (status === TicketStatus.REQUESTER_NOTIFIED) {
       data.requesterNotifiedAt = new Date();
     }
+  }
+
+  private applyCfoSignAutoCloseSideEffects(
+    data: Prisma.PaymentTicketUpdateInput,
+    existing: {
+      bankPortalReference: string | null;
+      xeroBillId: string | null;
+      xeroBillNumber: string | null;
+      xeroPaymentId: string | null;
+    },
+  ) {
+    const now = new Date();
+    const stamp = Date.now();
+    data.status = TicketStatus.PAYMENT_COMPLETE;
+    data.bankPaymentStatus = BankPaymentStatus.EXECUTED;
+    data.bankPortalReference = existing.bankPortalReference ?? `PAYGW-${stamp}`;
+    data.bankUploadedAt = now;
+    data.cfoSignedAt = now;
+    data.bankExecutedAt = now;
+    data.xeroSyncStatus = XeroSyncStatus.PAID_MARKED;
+    data.xeroBillId = existing.xeroBillId ?? `auto-xero-bill-${stamp}`;
+    data.xeroBillNumber = existing.xeroBillNumber ?? `AUTO-XBILL-${stamp}`;
+    data.xeroPaymentId = existing.xeroPaymentId ?? `auto-xero-payment-${stamp}`;
+    data.xeroLastSyncedAt = now;
+    data.xeroError = null;
+    data.requesterNotifiedAt = now;
   }
 
   private allowedTransitions(status: TicketStatus, user: RequestUser) {

@@ -66,6 +66,18 @@ export class PatchInvoiceDto {
   currency?: string;
 
   @IsOptional()
+  @IsString()
+  vendorAccountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  invoiceAccountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  accountVerificationSource?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)

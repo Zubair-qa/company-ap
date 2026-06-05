@@ -6,12 +6,13 @@ import {
   useMemo,
   useState,
 } from 'react';
-import type { RegisterPayload, User } from '../api/client';
+import type { RegisterDepartmentPayload, RegisterPayload, User } from '../api/client';
 import {
   api,
   getToken,
   login as apiLogin,
   logout as apiLogout,
+  registerDepartment as apiRegisterDepartment,
   register as apiRegister,
 } from '../api/client';
 
@@ -20,6 +21,7 @@ type AuthState = {
   loading: boolean;
   login: (email: string, password: string, departmentId: string) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<void>;
+  registerDepartment: (payload: RegisterDepartmentPayload) => Promise<void>;
   logout: () => void;
 };
 
@@ -55,14 +57,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(u);
   }, []);
 
+  const registerDepartment = useCallback(async (payload: RegisterDepartmentPayload) => {
+    const u = await apiRegisterDepartment(payload);
+    setUser(u);
+  }, []);
+
   const logout = useCallback(() => {
     apiLogout();
     setUser(null);
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout],
+    () => ({ user, loading, login, register, registerDepartment, logout }),
+    [user, loading, login, register, registerDepartment, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

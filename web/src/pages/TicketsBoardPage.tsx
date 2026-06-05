@@ -128,6 +128,21 @@ function human(value: string) {
   return value.replaceAll('_', ' ').toLowerCase();
 }
 
+function badgeTone(value: string | null | undefined) {
+  const normalized = (value ?? '').toUpperCase();
+  if (normalized === 'UNKNOWN' || normalized === 'NOT_READY') return 'badge badge-rose';
+  if (normalized === 'FAILED' || normalized === 'MISMATCH' || normalized === 'INCOMPLETE') {
+    return 'badge badge-rose';
+  }
+  if (normalized === 'COMPLETE' || normalized === 'EXECUTED' || normalized === 'PAID_MARKED') {
+    return 'badge badge-emerald';
+  }
+  if (normalized === 'READY_TO_SYNC' || normalized === 'READY_FOR_UPLOAD') {
+    return 'badge badge-amber';
+  }
+  return 'badge';
+}
+
 function displayPersonName(name: string | undefined | null) {
   return name === 'AP Clerk' ? 'AP Finance' : name ?? 'Unassigned';
 }
@@ -330,9 +345,15 @@ export function TicketsBoardPage() {
                     <span className={`badge doc-${ticket.documentStatus.toLowerCase()}`}>
                       {human(ticket.documentStatus)}
                     </span>
-                    <span className="badge">{human(ticket.xeroSyncStatus)}</span>
-                    <span className="badge">{human(ticket.bankPaymentStatus)}</span>
-                    <span className="badge">{human(ticket.whtFilerStatus)}</span>
+                    <span className={badgeTone(ticket.xeroSyncStatus)}>
+                      {human(ticket.xeroSyncStatus)}
+                    </span>
+                    <span className={badgeTone(ticket.bankPaymentStatus)}>
+                      {human(ticket.bankPaymentStatus)}
+                    </span>
+                    <span className={badgeTone(ticket.whtFilerStatus)}>
+                      {human(ticket.whtFilerStatus)}
+                    </span>
                   </div>
                   {ticket.missingDocuments.length ? (
                     <p className="missing-line">

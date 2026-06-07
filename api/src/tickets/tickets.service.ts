@@ -1587,7 +1587,7 @@ export class TicketsService {
       this.applyCfoSignAutoCloseSideEffects(data, existing);
     }
 
-    const updated = await this.prisma.paymentTicket.update({
+    let updated = await this.prisma.paymentTicket.update({
       where: { id },
       data: {
         ...data,
@@ -1605,6 +1605,13 @@ export class TicketsService {
       },
       include: ticketInclude,
     });
+    if (
+      statusChanged &&
+      existing.status === TicketStatus.BANK_UPLOAD &&
+      data.status === TicketStatus.CFO_SIGN_PENDING
+    ) {
+      updated = await this.autoCreateXeroBillForCfoSign(updated, user);
+    }
     await this.syncInvoiceFromTicket(updated.id);
     if (statusChanged) {
       await this.notifyTicketStatusChanged(
@@ -3478,6 +3485,175 @@ export class TicketsService {
     if (role === Role.DEPT_USER) return new Set<string>(DEPARTMENT_STAGE_FIELDS[status] ?? []);
     if (role === Role.DEPT_ADMIN) return new Set<string>();
     return new Set<string>(CFO_STAGE_FIELDS[status] ?? []);
+  }
+
+  private async autoCreateXeroBillForCfoSign(
+    ticket: Prisma.PaymentTicketGetPayload<{ include: typeof ticketInclude }>,
+    user: RequestUser,
+  ) {
+    if (ticket.xeroBillId || ticket.xeroSyncStatus === XeroSyncStatus.BILL_CREATED) {
+      return ticket;
+    }
+
+    try {
+      const connection = await this.activeXeroConnection();
+      const accountCode = this.config.get<string>('XERO_DEFAULT_EXPENSE_ACCOUNT') ?? '500';
+      const amount = Number(ticket.amountPkr);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Ticket amount must be greater than zero before Xero bill entry');
+      }
+
+      const response = await fetch('https://api.xero.com/api.xro/2.0/Invoices', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${connection.accessToken}`,
+          'xero-tenant-id': connection.tenantId,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          Invoices: [
+            {
+              Type: 'ACCPAY',
+              Contact: ticket.xeroContactId
+                ? { ContactID: ticket.xeroContactId }
+                : {
+                    Name:
+                      ticket.vendor?.displayName ??
+                      ticket.vendorNameSnapshot ??
+                      'Unknown vendor',
+                  },
+              DateString: new Date().toISOString().slice(0, 10),
+              DueDateString: (ticket.dueDate ?? new Date()).toISOString().slice(0, 10),
+              InvoiceNumber: ticket.invoiceNumber ?? ticket.internalReference ?? ticket.id,
+              Reference: ticket.internalReference ?? ticket.oldReference ?? ticket.id,
+              LineAmountTypes: 'Exclusive',
+              LineItems: [
+                {
+                  Description: ticket.title,
+                  Quantity: 1,
+                  UnitAmount: amount,
+                  AccountCode: accountCode,
+                },
+              ],
+            },
+          ],
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(`Xero bill sync failed: ${JSON.stringify(result)}`);
+      }
+
+      const invoice = (
+        result as { Invoices?: Array<{ InvoiceID?: string; InvoiceNumber?: string }> }
+      ).Invoices?.[0];
+      const updated = await this.prisma.paymentTicket.update({
+        where: { id: ticket.id },
+        data: {
+          xeroSyncStatus: XeroSyncStatus.BILL_CREATED,
+          xeroBillId: invoice?.InvoiceID,
+          xeroBillNumber: invoice?.InvoiceNumber,
+          xeroLastSyncedAt: new Date(),
+          xeroError: null,
+          activities: {
+            create: {
+              actor: { connect: { id: user.id } },
+              type: 'xero_auto_bill_created',
+              message: 'Xero bill was created automatically while sending the ticket for CFO sign.',
+              fromStatus: TicketStatus.BANK_UPLOAD,
+              toStatus: TicketStatus.CFO_SIGN_PENDING,
+            },
+          },
+        },
+        include: ticketInclude,
+      });
+      await this.prisma.xeroConnection.update({
+        where: { id: connection.id },
+        data: { lastSyncedAt: new Date() },
+      });
+      return updated;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Xero bill auto-sync failed';
+      return this.prisma.paymentTicket.update({
+        where: { id: ticket.id },
+        data: {
+          xeroSyncStatus: XeroSyncStatus.SYNC_FAILED,
+          xeroError: message.slice(0, 2000),
+          activities: {
+            create: {
+              actor: { connect: { id: user.id } },
+              type: 'xero_auto_bill_failed',
+              message: `Xero bill auto-sync failed, but CFO routing continued: ${message.slice(0, 500)}`,
+              fromStatus: TicketStatus.BANK_UPLOAD,
+              toStatus: TicketStatus.CFO_SIGN_PENDING,
+            },
+          },
+        },
+        include: ticketInclude,
+      });
+    }
+  }
+
+  private async activeXeroConnection() {
+    const connection = await this.prisma.xeroConnection.findFirst({
+      where: { active: true, accessToken: { not: null } },
+      orderBy: { connectedAt: 'desc' },
+    });
+    if (!connection?.accessToken) {
+      throw new Error('Connect Xero before syncing bills');
+    }
+    const expiresSoon =
+      connection.expiresAt && connection.expiresAt.getTime() <= Date.now() + 60_000;
+    if (expiresSoon && connection.refreshToken) {
+      return this.refreshXeroConnection(connection);
+    }
+    return connection as typeof connection & { accessToken: string };
+  }
+
+  private async refreshXeroConnection(connection: {
+    id: string;
+    refreshToken: string | null;
+  }) {
+    const clientId = this.config.get<string>('XERO_CLIENT_ID');
+    const clientSecret = this.config.get<string>('XERO_CLIENT_SECRET');
+    if (!clientId || !clientSecret || !connection.refreshToken) {
+      throw new Error('Xero refresh token or client credentials are missing');
+    }
+    const tokenRes = await fetch('https://identity.xero.com/connect/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: connection.refreshToken,
+      }),
+    });
+    if (!tokenRes.ok) {
+      throw new Error(`Xero token refresh failed: ${await tokenRes.text()}`);
+    }
+    const token = (await tokenRes.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+    const updated = await this.prisma.xeroConnection.update({
+      where: { id: connection.id },
+      data: {
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token ?? connection.refreshToken,
+        expiresAt: token.expires_in
+          ? new Date(Date.now() + token.expires_in * 1000)
+          : undefined,
+      },
+    });
+    if (!updated.accessToken) {
+      throw new Error('Xero token refresh did not return an access token');
+    }
+    return updated as typeof updated & { accessToken: string };
   }
 
   private applyStatusSideEffects(

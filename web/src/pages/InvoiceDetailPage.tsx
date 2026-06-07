@@ -187,6 +187,20 @@ function purchaseOrderRequiredFromExtracted(extracted: unknown) {
   if (typeof data.purchaseOrderRequired === 'boolean') return data.purchaseOrderRequired;
   return data.procurementMode !== 'NON_PURCHASE_ORDER';
 }
+
+function extractedPurchaseOrderNumber(extracted: unknown) {
+  if (!extracted || typeof extracted !== 'object' || Array.isArray(extracted)) return '';
+  const data = extracted as Record<string, unknown>;
+  return (
+    extractedText(data.poNumber) ||
+    extractedText(data.purchaseOrderNumber) ||
+    extractedText(data.purchaseOrderNo)
+  );
+}
+
+function invoicePurchaseOrderNumber(invoice: InvoiceDetail) {
+  return invoice.purchaseOrder?.poNumber || extractedPurchaseOrderNumber(invoice.extracted);
+}
 export function InvoiceDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -421,6 +435,8 @@ export function InvoiceDetailPage() {
       </div>
     );
   }
+  const headerPoNumber = invoicePurchaseOrderNumber(inv);
+  const headerPurchaseOrderRequired = purchaseOrderRequiredFromExtracted(inv.extracted);
   return (
     <div>
       <p>
@@ -460,10 +476,14 @@ export function InvoiceDetailPage() {
             <strong>Description:</strong> {inv.description}
           </p>
         ) : null}
-        {inv.purchaseOrder ? (
+        {headerPoNumber && headerPurchaseOrderRequired ? (
           <p>
-            <strong>Purchase order:</strong> {inv.purchaseOrder.poNumber}{' '}
-            <span className="badge">{inv.purchaseOrder.status.replaceAll('_', ' ')}</span>
+            <strong>Purchase order:</strong> {headerPoNumber}{' '}
+            <span className="badge">
+              {inv.purchaseOrder
+                ? inv.purchaseOrder.status.replaceAll('_', ' ')
+                : 'extracted from PO slip'}
+            </span>
           </p>
         ) : null}
         <AgentVerification extracted={inv.extracted} />
@@ -609,7 +629,7 @@ function EditInvoiceForm({
   const [invoiceDate, setInvoiceDate] = useState(toDateInput(invoice.invoiceDate));
   const [receivedDate, setReceivedDate] = useState(toDateInput(invoice.receivedDate));
   const [dueDate, setDueDate] = useState(toDateInput(invoice.dueDate));
-  const [currency, setCurrency] = useState(invoice.currency ?? 'PKR');
+  const currency = 'PKR';
   const [subtotal, setSubtotal] = useState(invoice.subtotal ?? invoice.amountPkr ?? '0');
   const [taxAmount, setTaxAmount] = useState(invoice.taxAmount ?? '0');
   const [withholdingTax, setWithholdingTax] = useState(invoice.withholdingTax ?? '0');
@@ -641,6 +661,7 @@ function EditInvoiceForm({
   );
   const selectedVendor = vendors.find((vendor) => vendor.id === vendorId) ?? invoice.vendor;
   const purchaseOrderRequired = purchaseOrderRequiredFromExtracted(invoice.extracted);
+  const poNumberFromSlip = invoicePurchaseOrderNumber(invoice);
 
   useEffect(() => {
     setReceivedDate(toDateInput(invoice.receivedDate));
@@ -749,7 +770,11 @@ function EditInvoiceForm({
             <>
               <div className="field">
                 <label>PO number</label>
-                <input value={invoice.purchaseOrder?.poNumber ?? 'Auto generated'} disabled />
+                <input
+                  value={poNumberFromSlip}
+                  placeholder="Pending PO slip OCR"
+                  disabled
+                />
               </div>
               <div className="field">
                 <label>PO status</label>
@@ -763,12 +788,7 @@ function EditInvoiceForm({
           ) : null}
           <div className="field">
             <label>Currency</label>
-            <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              <option value="PKR">PKR</option>
-              <option value="USD">USD</option>
-              <option value="EUR">EUR</option>
-              <option value="GBP">GBP</option>
-            </select>
+            <input value="PKR" disabled />
           </div>
           <div className="field">
             <label>{purchaseOrderRequired ? 'Invoice / PO subtotal' : 'Invoice subtotal'}</label>

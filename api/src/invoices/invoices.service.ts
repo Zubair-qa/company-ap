@@ -14,7 +14,6 @@ import {
   InvoiceStatus,
   PaymentMilestoneKind,
   PaymentMilestoneStatus,
-  PaymentMethod,
   PaymentPlanStatus,
   PaymentPlanType,
   Prisma,
@@ -1269,7 +1268,6 @@ export class InvoicesService {
       invoiceNumber: inv.invoiceNumber ?? inv.reference,
       internalReference,
       amountPkr: ticketAmount,
-      paymentMethod: PaymentMethod.BANK_PORTAL,
       vendorAccountNumber: accountFields.vendorAccountNumber,
       invoiceAccountNumber: accountFields.invoiceAccountNumber,
       accountVerificationSource: accountFields.accountVerificationSource,
@@ -1583,7 +1581,6 @@ export class InvoicesService {
         invoiceNumber: inv.invoiceNumber ?? inv.reference,
         internalReference: `AP-${invoiceId.slice(0, 8).toUpperCase()}`,
         amountPkr: ticketAmount,
-        paymentMethod: PaymentMethod.BANK_PORTAL,
         accountVerificationStatus: needsVendorReview
           ? AccountVerificationStatus.NEEDS_MANUAL_REVIEW
           : AccountVerificationStatus.NOT_CHECKED,
@@ -1645,11 +1642,10 @@ export class InvoicesService {
         : null;
     const amount = extractedPoAmount ?? (inv.totalAmount.gt(0) ? inv.totalAmount : inv.amountPkr);
     const subtotal = inv.subtotal.gt(0) ? inv.subtotal : amount;
-    const poNumber = await this.uniquePurchaseOrderNumber(
-      extractedString(extracted.poNumber) ?? `PO-${inv.id.slice(0, 8).toUpperCase()}`,
-      inv.id,
-      inv.poId,
-    );
+    const poNumber = extractedString(extracted.poNumber);
+    if (!poNumber) {
+      return null;
+    }
     const poDate = dateFromIso(extractedString(extracted.poDate) ?? undefined) ?? inv.invoiceDate ?? inv.receivedDate ?? new Date();
     const expectedDeliveryDate = inv.dueDate ?? undefined;
     const notes =
@@ -1659,10 +1655,25 @@ export class InvoicesService {
       `Synced PO for invoice ${inv.id.slice(0, 8)}`;
     const lineDescription = inv.description ?? inv.reference ?? inv.originalFilename ?? poNumber;
 
+    const existingPo = await this.prisma.purchaseOrder.findUnique({
+      where: { poNumber },
+      select: { id: true },
+    });
+    if (existingPo && existingPo.id !== inv.poId) {
+      await this.prisma.invoice.update({
+        where: { id: inv.id },
+        data: { poId: existingPo.id },
+      });
+      return this.prisma.purchaseOrder.findUniqueOrThrow({
+        where: { id: existingPo.id },
+      });
+    }
+
     const po = inv.poId
       ? await this.prisma.purchaseOrder.update({
           where: { id: inv.poId },
           data: {
+            poNumber,
             vendor: { connect: { id: vendorId } },
             department: { connect: { id: inv.departmentId } },
             poDate,
@@ -1711,27 +1722,6 @@ export class InvoicesService {
     }
 
     return po;
-  }
-
-  private async uniquePurchaseOrderNumber(
-    preferred: string,
-    invoiceId: string,
-    currentPoId: string | null,
-  ) {
-    const cleaned = preferred.trim() || `PO-${invoiceId.slice(0, 8).toUpperCase()}`;
-    const existing = await this.prisma.purchaseOrder.findUnique({
-      where: { poNumber: cleaned },
-      select: { id: true },
-    });
-    if (!existing || existing.id === currentPoId) return cleaned;
-
-    const fallback = `${cleaned}-${invoiceId.slice(0, 4).toUpperCase()}`;
-    const fallbackExisting = await this.prisma.purchaseOrder.findUnique({
-      where: { poNumber: fallback },
-      select: { id: true },
-    });
-    if (!fallbackExisting || fallbackExisting.id === currentPoId) return fallback;
-    return `PO-${invoiceId.slice(0, 8).toUpperCase()}`;
   }
 
   private async upsertPaymentPlanFromInvoice(
@@ -2220,7 +2210,10 @@ export class InvoicesService {
     const autoDates = automaticInvoiceDates();
     data.receivedDate = autoDates.receivedDate;
     data.dueDate = autoDates.dueDate;
-    if (dto.currency) data.currency = dto.currency;
+    if (dto.currency && dto.currency !== 'PKR') {
+      throw new BadRequestException('Currency is fixed to PKR');
+    }
+    data.currency = 'PKR';
     if (
       dto.vendorAccountNumber !== undefined ||
       dto.invoiceAccountNumber !== undefined ||

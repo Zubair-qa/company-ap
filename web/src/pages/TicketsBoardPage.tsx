@@ -21,7 +21,7 @@ type Ticket = {
   invoiceNumber: string | null;
   internalReference: string | null;
   amountPkr: string;
-  paymentMethod: string;
+  paymentMethod: string | null;
   documentStatus: string;
   missingDocuments: string[];
   dueDate: string | null;
@@ -124,7 +124,8 @@ const compactDate = new Intl.DateTimeFormat('en-PK', {
   month: 'short',
 });
 
-function human(value: string) {
+function human(value: string | null | undefined) {
+  if (!value) return 'not selected';
   return value.replaceAll('_', ' ').toLowerCase();
 }
 

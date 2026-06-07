@@ -291,6 +291,8 @@ const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
   [TicketStatus.BANK_UPLOAD]: [
     'status',
     'assignedToId',
+    'paymentMethod',
+    'expenseNature',
     'whtFilerStatus',
     'whtRate',
     'voucherNumber',
@@ -298,7 +300,6 @@ const AP_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> = {
     'bankPortalReference',
     'notes',
   ],
-  [TicketStatus.CFO_SIGN_PENDING]: ['status', 'assignedToId', 'notes'],
   [TicketStatus.BANK_EXECUTION_PENDING]: [
     'status',
     'bankPaymentStatus',
@@ -327,14 +328,12 @@ const DEPARTMENT_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> 
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -348,14 +347,12 @@ const DEPARTMENT_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> 
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -369,14 +366,12 @@ const DEPARTMENT_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> 
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -399,14 +394,12 @@ const DEPARTMENT_STAGE_FIELDS: Partial<Record<TicketStatus, readonly string[]>> 
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -1396,7 +1389,10 @@ export class TicketsService {
         createdBy: { connect: { id: user.id } },
         submittedToFinanceAt,
         dueDate,
-        expenseNature: dto.expenseNature,
+        expenseNature:
+          user.role === Role.AP_CLERK || user.role === Role.COMPANY_ADMIN
+            ? dto.expenseNature
+            : undefined,
         billType: dto.billType,
         vendor: dto.vendorId ? { connect: { id: dto.vendorId } } : undefined,
         vendorNameSnapshot: nullableString(dto.vendorNameSnapshot),
@@ -1406,7 +1402,10 @@ export class TicketsService {
         invoiceNumber: nullableString(dto.invoiceNumber),
         internalReference: nullableString(dto.internalReference),
         amountPkr,
-        paymentMethod: dto.paymentMethod,
+        paymentMethod:
+          user.role === Role.AP_CLERK || user.role === Role.COMPANY_ADMIN
+            ? dto.paymentMethod ?? null
+            : null,
         vendorAccountNumber: nullableString(dto.vendorAccountNumber),
         invoiceAccountNumber: nullableString(dto.invoiceAccountNumber),
         accountVerificationStatus: dto.accountVerificationStatus,
@@ -1471,9 +1470,19 @@ export class TicketsService {
         dto.status === TicketStatus.CFO_SIGN_PENDING
       ) {
         const nextFilerStatus = dto.whtFilerStatus ?? existing.whtFilerStatus;
+        const nextExpenseNature =
+          dto.expenseNature === ExpenseNature.OTHER &&
+          existing.expenseNature !== ExpenseNature.OTHER
+            ? existing.expenseNature
+            : dto.expenseNature ?? existing.expenseNature;
         if (nextFilerStatus === FilerStatus.UNKNOWN) {
           throw new BadRequestException(
             'AP Finance must select filer/non-filer before CFO sign',
+          );
+        }
+        if (nextExpenseNature === ExpenseNature.OTHER) {
+          throw new BadRequestException(
+            'AP Finance must select report category/head before CFO sign',
           );
         }
       }
@@ -1484,6 +1493,14 @@ export class TicketsService {
 
     const data: Prisma.PaymentTicketUpdateInput = {};
     this.assignScalars(data, dto);
+    if (
+      existing.status === TicketStatus.BANK_UPLOAD &&
+      dto.status === TicketStatus.CFO_SIGN_PENDING &&
+      dto.expenseNature === ExpenseNature.OTHER &&
+      existing.expenseNature !== ExpenseNature.OTHER
+    ) {
+      data.expenseNature = existing.expenseNature;
+    }
 
     if (dto.departmentId) data.department = { connect: { id: dto.departmentId } };
     if (dto.vendorId !== undefined) {

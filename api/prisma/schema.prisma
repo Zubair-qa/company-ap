@@ -750,7 +750,7 @@ model PaymentTicket {
   invoiceNumber             String?
   internalReference         String?
   amountPkr                 Decimal                   @default(0) @db.Decimal(14, 2)
-  paymentMethod             PaymentMethod             @default(BANK_PORTAL)
+  paymentMethod             PaymentMethod?
   vendorAccountNumber       String?
   invoiceAccountNumber      String?
   accountVerificationStatus AccountVerificationStatus @default(NOT_CHECKED)

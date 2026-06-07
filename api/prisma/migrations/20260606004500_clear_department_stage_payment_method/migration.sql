@@ -1,0 +1,10 @@
+UPDATE "PaymentTicket"
+SET "paymentMethod" = NULL
+WHERE "status" IN (
+  'NEW_REQUEST',
+  'ADVANCE_PAID_REMAINING_PENDING',
+  'MISSING_DOCS',
+  'REQUESTER_PINGED',
+  'WAITING_FOR_DOCS'
+)
+AND "bankPaymentStatus" = 'NOT_READY';

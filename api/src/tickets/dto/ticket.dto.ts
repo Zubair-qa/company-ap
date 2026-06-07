@@ -71,7 +71,7 @@ export class CreateTicketDto {
 
   @IsOptional()
   @IsEnum(PaymentMethod)
-  paymentMethod?: PaymentMethod;
+  paymentMethod?: PaymentMethod | null;
 
   @IsOptional()
   @IsString()
@@ -256,7 +256,7 @@ export class UpdateTicketDto {
 
   @IsOptional()
   @IsEnum(PaymentMethod)
-  paymentMethod?: PaymentMethod;
+  paymentMethod?: PaymentMethod | null;
 
   @IsOptional()
   @IsString()

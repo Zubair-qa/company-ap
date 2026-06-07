@@ -45,7 +45,7 @@ type TicketDetail = {
   invoiceNumber: string | null;
   internalReference: string | null;
   amountPkr: string;
-  paymentMethod: string;
+  paymentMethod: string | null;
   vendorAccountNumber: string | null;
   invoiceAccountNumber: string | null;
   accountVerificationStatus: string;
@@ -241,7 +241,7 @@ const billOptions = [
   'CASH_SLIP',
   'EMAIL_INVOICE',
 ];
-const paymentOptions = ['BANK_PORTAL', 'CHEQUE', 'CASH'];
+const paymentOptions = ['', 'BANK_PORTAL', 'CHEQUE', 'CASH'];
 const xeroOptions = ['NOT_READY', 'READY_TO_SYNC', 'BILL_CREATED', 'SYNC_FAILED', 'PAID_MARKED'];
 const bankOptions = ['NOT_READY', 'READY_FOR_UPLOAD', 'UPLOADED', 'CFO_SIGNED', 'EXECUTED', 'FAILED'];
 const filerOptions = ['UNKNOWN', 'FILER', 'NON_FILER'];
@@ -338,6 +338,8 @@ const apStageFields: Record<string, string[]> = {
   BANK_UPLOAD: [
     'status',
     'assignedToId',
+    'paymentMethod',
+    'expenseNature',
     'whtFilerStatus',
     'whtRate',
     'voucherNumber',
@@ -345,7 +347,6 @@ const apStageFields: Record<string, string[]> = {
     'bankPortalReference',
     'notes',
   ],
-  CFO_SIGN_PENDING: ['status', 'assignedToId', 'notes'],
   BANK_EXECUTION_PENDING: ['status', 'bankPaymentStatus', 'bankPortalReference', 'notes'],
   BANK_EXECUTED: ['status', 'xeroSyncStatus', 'xeroPaymentId', 'notes'],
   MARKED_PAID_IN_XERO: ['status', 'notes'],
@@ -364,14 +365,12 @@ const departmentStageFields: Record<string, string[]> = {
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -385,14 +384,12 @@ const departmentStageFields: Record<string, string[]> = {
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -406,14 +403,12 @@ const departmentStageFields: Record<string, string[]> = {
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -436,14 +431,12 @@ const departmentStageFields: Record<string, string[]> = {
     'invoiceNumber',
     'internalReference',
     'amountPkr',
-    'paymentMethod',
     'vendorAccountNumber',
     'invoiceAccountNumber',
     'accountVerificationSource',
     'legacySheetRowId',
     'legacySheetName',
     'oldReference',
-    'expenseNature',
     'billType',
     'notes',
   ],
@@ -459,7 +452,8 @@ const pkr = new Intl.NumberFormat('en-PK', {
   maximumFractionDigits: 0,
 });
 
-function human(value: string) {
+function human(value: string | null | undefined) {
+  if (!value) return 'not selected';
   return value.replaceAll('_', ' ').toLowerCase();
 }
 
@@ -503,7 +497,7 @@ function makeDraft(ticket: TicketDetail): Draft {
     invoiceNumber: ticket.invoiceNumber ?? '',
     internalReference: ticket.internalReference ?? '',
     amountPkr: ticket.amountPkr,
-    paymentMethod: ticket.paymentMethod,
+    paymentMethod: ticket.paymentMethod ?? '',
     vendorAccountNumber: ticket.vendorAccountNumber ?? '',
     invoiceAccountNumber: ticket.invoiceAccountNumber ?? '',
     accountVerificationStatus: ticket.accountVerificationStatus,
@@ -945,7 +939,12 @@ export function TicketDetailPage() {
   const canUseXeroActions = Boolean(!isClosed && (isCompanyAdmin || isAp));
   const canCreateXeroBill = Boolean(canUseXeroActions && ticket.status === 'XERO_BILL_ENTRY');
   const canMarkPaidInXero = Boolean(canUseXeroActions && ticket.status === 'BANK_EXECUTED');
-  const canSaveTicket = Boolean(!isClosed && !isCfo && editableFields.size > 0);
+  const canSaveTicket = Boolean(
+    !isClosed &&
+      !isCfo &&
+      !(isAp && ticket.status === 'CFO_SIGN_PENDING') &&
+      editableFields.size > 0,
+  );
   const canUploadAttachment = Boolean(
     !isClosed &&
       (isCompanyAdmin ||
@@ -992,7 +991,7 @@ export function TicketDetailPage() {
       invoiceNumber: draft.invoiceNumber || null,
       internalReference: draft.internalReference || null,
       amountPkr: Number(draft.amountPkr || 0),
-      paymentMethod: draft.paymentMethod,
+      paymentMethod: draft.paymentMethod || null,
       vendorAccountNumber: draft.vendorAccountNumber || null,
       invoiceAccountNumber: draft.invoiceAccountNumber || null,
       accountVerificationStatus: draft.accountVerificationStatus,
@@ -1522,7 +1521,7 @@ export function TicketDetailPage() {
             </select>
           </div>
           <SelectField
-            label="Expense nature"
+            label="Report category / head"
             value={draft.expenseNature}
             options={expenseOptions}
             onChange={(value) => field('expenseNature', value)}
